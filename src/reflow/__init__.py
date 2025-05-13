@@ -1,22 +1,19 @@
 from abc import abstractmethod
-from typing import Generic, TypeVar, Callable, Awaitable, List, Self
+from typing import Generic, Callable, Awaitable, List, Self
 
-from internal import Worker
+from .internal import Worker, SourceWorker, SinkWorker
 
-EVENT_TYPE = TypeVar('EVENT_TYPE')
-IN_EVENT_TYPE = TypeVar('IN_EVENT_TYPE')
-OUT_EVENT_TYPE = TypeVar('OUT_EVENT_TYPE')
-STATE_TYPE = TypeVar('STATE_TYPE')
-
-
+from typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn
 
 
 class FlowStage:
-    def __init__(self):
+    def __init__(self, init_fn: InitFn = None):
+        self.init_fn = init_fn
+        self.state = None
         self.downstream_stages = []
 
-    def add_downstream(self, flow_stage: Self)->None:
-        self.downstream_stages.append(flow_stage)
+    def write_to(self, sink: "EventSink"):
+        self.downstream_stages.append(sink)
 
     @abstractmethod
     def build_worker(self) ->Worker:
@@ -27,8 +24,6 @@ class FlowStage:
         Recursively builds and connects the workers for downstream stages. The return value is the list of Workers
         for this stage, with all downstream workers connected.
         """
-        # downstream workers now contains a list of worker lists
-        # there is one entry in the outer list for each downstream stage consisting of the list of workers for that stage
         downstream_workers = []
         for stage in self.downstream_stages:
             downstream_workers.append(stage.build_flow())
@@ -46,43 +41,39 @@ class FlowStage:
         return result
 
 
-class EventSource(Generic[EVENT_TYPE, STATE_TYPE],FlowStage):
-    def __init__(self, init_fn: Callable[[], Awaitable[STATE_TYPE]] = None):
-        FlowStage.__init__(self)
-        self.init_fn = init_fn
+class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
+    def __init__(self, init_fn: InitFn = None):
+        FlowStage.__init__(self, init_fn)
         self.producer_fn = None
 
-    def with_producer_fn(self, producer_fn: Callable[[int, STATE_TYPE], Awaitable[List[EVENT_TYPE]]] | Callable[[int], Awaitable[List[EVENT_TYPE]]]):
+    def with_producer_fn(self, producer_fn: ProducerFn)->Self:
         self.producer_fn = producer_fn
         return self
 
-    def build_worker(self)->Worker:
-        return Worker(init_fn=self.init_fn, produce_fn=self.producer_fn)
+    def build_worker(self)->SourceWorker:
+        return SourceWorker(init_fn=self.init_fn, producer_fn=self.producer_fn)
 
 
 class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, init_fn: Callable[[], Awaitable[STATE_TYPE]] = None):
-        FlowStage.__init__(self)
-        self.init_fn = init_fn
+    def __init__(self, init_fn: InitFn = None):
+        FlowStage.__init__(self, init_fn)
         self.consumer_fn = None
 
-    def with_consumer_fn(self, consumer_fn: Callable[[List[EVENT_TYPE], STATE_TYPE], Awaitable[None]] | Callable[[List[EVENT_TYPE]], Awaitable[None]]):
+    def with_consumer_fn(self, consumer_fn: ConsumerFn)->Self:
         self.consumer_fn = consumer_fn
         return self
 
-    def build_worker(self)->Worker:
-        return Worker(init_fn=self.init_fn, consume_fn=self.consumer_fn)
+    def build_worker(self)->SinkWorker:
+        return SinkWorker(init_fn=self.init_fn, consumer_fn=self.consumer_fn)
+
+    def write_to(self, sink: "EventSink"):
+        # TODO log a warning
+        pass
 
 
-def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., Callable[[],Awaitable[STATE_TYPE]]]:
+def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
     """
     A decorator that is used to create custom connections to outside services.
-
-    Args:
-        init_fn:
-
-    Returns:
-
     """
     def wrapper(*args, **kwargs)->Callable[[],Awaitable[STATE_TYPE]]:
         async def inner():

@@ -44,27 +44,27 @@ And lose the name of action"""]
 T = TypeVar("T")
 
 class TestDataConnection(Generic[T]):
-    def __init__(self, data: List[str]):
+    def __init__(self, data: List[T]):
         self.data = data
 
-    def get_data(self, max_items: int):
+    async def get_data(self, max_items: int)->List[T]:
         return random.choices(self.data, k=max_items)
 
-async def produce_data(max_items: int, connection: TestDataConnection[T])->List[T]:
-    return connection.get_data(max_items)
-
 @flow_connector
-async def data_source(data: List[str])->TestDataConnection[str]:
+async def data_source(data):
     return TestDataConnection(data)
 
 async def debug_sink(events: List[str])-> None:
     for event in events:
         print(f'EVENT: {event}')
 
+async def word_split(sentence: str)->List[str]:
+    return sentence.split()
+
 async def main():
-    source = EventSource(data_source(hamlet_sentences)).with_producer_fn(produce_data)
+    source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
     sink = EventSink().with_consumer_fn(debug_sink)
-    source.add_downstream(sink)
+    source.write_to(sink)
 
     flow_engine = LocalFlowEngine()
     await flow_engine.run(source)
