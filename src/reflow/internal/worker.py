@@ -13,7 +13,7 @@ class INSTRUCTION(Enum):
 
 
 class Envelope(Generic[EVENT_TYPE]):
-    def __init__(self, event: EVENT_TYPE):
+    def __init__(self, instruction: INSTRUCTION, event: EVENT_TYPE = None):
         self.instruction = INSTRUCTION.PROCESS_EVENT
         self.event = event
 
@@ -31,9 +31,9 @@ class Worker(ABC, Generic[STATE_TYPE, OUT_EVENT_TYPE]):
             self.state = await self.init_fn()
 
     # note that this is async because, in general, using the underlying queue storage mechanism may involve network IO
-    async def enqueue_events(self, events: List[Envelope[Any]])->None:
+    async def enqueue_events(self, events: List[Any])->None:
         for event in events:
-            await self.input_queue.put(event)
+            await self.input_queue.put(Envelope(INSTRUCTION.PROCESS_EVENT, event))
 
     def add_worker_group(self, workers: List[Self]):
         self.next_workers.append(workers)
@@ -43,7 +43,9 @@ class Worker(ABC, Generic[STATE_TYPE, OUT_EVENT_TYPE]):
             for worker_group in self.next_workers:
                 i = 0
                 n = len(worker_group)
-                worker_lists = [[] for _ in worker_group]
+                # worker_event_lists is a list of events for each worker in this group
+                # each event is dispatcher to one worker in the group
+                worker_event_lists = [[] for _ in worker_group]
                 for event in events:
                     if self.routing_key_extractor:
                         s = hash(self.routing_key_extractor(event)) % n
@@ -51,10 +53,10 @@ class Worker(ABC, Generic[STATE_TYPE, OUT_EVENT_TYPE]):
                         i += 1
                         s = i % n
 
-                    worker_lists[s].append(event)
+                    worker_event_lists[s].append(event)
 
                 for t, worker in enumerate(worker_group):
-                    await worker.enqueue_events(worker_lists[t])
+                    await worker.enqueue_events(worker_event_lists[t])
 
     @abstractmethod
     async def process(self, max_event_count: int)->None:
@@ -83,16 +85,18 @@ class SinkWorker(Worker, Generic[EVENT_TYPE, STATE_TYPE]):
         self.consumer_fn = consumer_fn
 
     async def process(self, max_event_count: int):
-        ready_events = []
+        event_envelopes = []
 
         try:
             for _ in range(max_event_count):
-                ready_events.append(self.input_queue.get_nowait())
+                event_envelopes.append(self.input_queue.get_nowait())
         except StopIteration:
             pass
 
+        events = [envelope.event for envelope in event_envelopes if envelope.instruction == INSTRUCTION.PROCESS_EVENT]
+
         if self.state:
-            await self.consumer_fn(self.state, ready_events)
+            await self.consumer_fn(self.state, events)
         else:
-            await self.consumer_fn(ready_events)
+            await self.consumer_fn(events)
 
