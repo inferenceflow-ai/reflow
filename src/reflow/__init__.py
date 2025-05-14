@@ -1,9 +1,11 @@
+import logging
 from abc import abstractmethod
 from typing import Generic, Callable, Awaitable, List, Self
 
+from internal import SplitWorker
 from .internal import Worker, SourceWorker, SinkWorker
 
-from typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn
+from typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
 
 
 class FlowStage:
@@ -12,8 +14,9 @@ class FlowStage:
         self.state = None
         self.downstream_stages = []
 
-    def write_to(self, sink: "EventSink"):
-        self.downstream_stages.append(sink)
+    def send_to(self, next_stage: "FlowStage")->"FlowStage":
+        self.downstream_stages.append(next_stage)
+        return next_stage
 
     @abstractmethod
     def build_worker(self) ->Worker:
@@ -66,9 +69,22 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
     def build_worker(self)->SinkWorker:
         return SinkWorker(init_fn=self.init_fn, consumer_fn=self.consumer_fn)
 
-    def write_to(self, sink: "EventSink"):
+    def send_to(self, next_stage: "EventSink"):
         # TODO log a warning
         pass
+
+
+class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
+    def __init__(self, init_fn: InitFn = None):
+        FlowStage.__init__(self, init_fn)
+        self.split_fn = None
+
+    def with_split_fn(self, split_fn: SplitFn)->Self:
+        self.split_fn = split_fn
+        return self
+
+    def build_worker(self)->SplitWorker:
+        return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn)
 
 
 def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
@@ -95,6 +111,7 @@ class LocalFlowEngine:
 
     async def process_workers_and_downstream_workers(self, workers: List[Worker]):
         for worker in workers:
+            logging.debug(f'processing worker {worker} with {worker.input_queue.qsize()} waiting events')
             await worker.process(10)
             for downstream_worker_group in worker.next_workers:
                 # note we are calling init too many times

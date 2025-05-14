@@ -1,9 +1,10 @@
 import asyncio
 from abc import ABC, abstractmethod
+from asyncio import QueueEmpty
 from enum import Enum
 from typing import Generic, List, Self, Any
 
-from ..typedefs import EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE
+from typedefs import IN_EVENT_TYPE, SplitFn,  EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE
 
 MAX_INPUT_QUEUE_SIZE = 10000
 
@@ -14,7 +15,7 @@ class INSTRUCTION(Enum):
 
 class Envelope(Generic[EVENT_TYPE]):
     def __init__(self, instruction: INSTRUCTION, event: EVENT_TYPE = None):
-        self.instruction = INSTRUCTION.PROCESS_EVENT
+        self.instruction = instruction
         self.event = event
 
 
@@ -37,6 +38,19 @@ class Worker(ABC, Generic[STATE_TYPE, OUT_EVENT_TYPE]):
 
     def add_worker_group(self, workers: List[Self]):
         self.next_workers.append(workers)
+
+    def get_ready_events(self, max_event_count: int)->List[IN_EVENT_TYPE]:
+        event_envelopes = []
+
+        try:
+            for _ in range(max_event_count):
+                event_envelopes.append(self.input_queue.get_nowait())
+        except QueueEmpty:
+            pass
+
+        return  [envelope.event for envelope in event_envelopes if envelope.instruction == INSTRUCTION.PROCESS_EVENT]
+
+
 
     async def dispatch(self, events: List[OUT_EVENT_TYPE]):
         if self.next_workers and len(events) > 0:
@@ -85,18 +99,32 @@ class SinkWorker(Worker, Generic[EVENT_TYPE, STATE_TYPE]):
         self.consumer_fn = consumer_fn
 
     async def process(self, max_event_count: int):
-        event_envelopes = []
-
-        try:
-            for _ in range(max_event_count):
-                event_envelopes.append(self.input_queue.get_nowait())
-        except StopIteration:
-            pass
-
-        events = [envelope.event for envelope in event_envelopes if envelope.instruction == INSTRUCTION.PROCESS_EVENT]
+        events = self.get_ready_events(max_event_count)
 
         if self.state:
             await self.consumer_fn(self.state, events)
         else:
             await self.consumer_fn(events)
+
+
+class SplitWorker(Worker, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
+    def __init__(self, *, split_fn: SplitFn, init_fn: InitFn = None):
+        Worker.__init__(self, init_fn)
+        self.split_fn = split_fn
+
+    async def process(self, max_event_count: int):
+        events = self.get_ready_events(max_event_count)
+
+        result = []
+        for event in events:
+            # TODO - do all workers have to be coroutines ?
+            if self.state:
+                parts = await self.split_fn(self.state, event)
+            else:
+                parts = await self.split_fn(event)
+
+            result.extend(parts)
+
+        await self.dispatch(result)
+
 

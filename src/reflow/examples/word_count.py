@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import random
+from logging import DEBUG
 from typing import List, TypeVar, Generic
-from reflow import flow_connector, EventSource, EventSink, LocalFlowEngine
+from reflow import flow_connector, EventSource, EventSink, LocalFlowEngine, Splitter
 
 hamlet_sentences =  [
 """To be, or not to be, that is the question:
@@ -58,15 +60,17 @@ async def debug_sink(events: List[str])-> None:
     for event in events:
         print(f'EVENT: {event}')
 
-async def word_split(sentence: str)->List[str]:
+async def split_fn(sentence):
     return sentence.split()
 
 async def main():
     source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
+    splitter = Splitter().with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
-    source.write_to(sink)
+    source.send_to(splitter).send_to(sink)
 
     flow_engine = LocalFlowEngine()
     await flow_engine.run(source)
 
+logging.basicConfig(level=DEBUG)
 asyncio.run(main())
