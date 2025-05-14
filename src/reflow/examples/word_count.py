@@ -60,17 +60,26 @@ async def debug_sink(events: List[str])-> None:
     for event in events:
         print(f'EVENT: {event}')
 
+async def null_sink(events: List[str])-> None:
+    pass
+
+
 async def split_fn(sentence):
     return sentence.split()
 
 async def main():
     source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
-    splitter = Splitter().with_split_fn(split_fn)
+    splitter = Splitter(expansion_factor=50).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(sink)
 
     flow_engine = LocalFlowEngine()
     await flow_engine.run(source)
 
-logging.basicConfig(level=DEBUG)
+logging.basicConfig()
 asyncio.run(main())
+
+# TODO
+#
+# 1. Need to deal with QueueFull
+# 2. Expansion factor is critical to flow control - is there a better way to compute it ?

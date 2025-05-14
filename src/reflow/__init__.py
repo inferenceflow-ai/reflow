@@ -75,8 +75,9 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
 
 class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, init_fn: InitFn = None):
-        FlowStage.__init__(self, init_fn)
+    def __init__(self, expansion_factor: int, init_fn: InitFn = None):
+        FlowStage.__init__(self, init_fn=init_fn)
+        self.expansion_factor = expansion_factor
         self.split_fn = None
 
     def with_split_fn(self, split_fn: SplitFn)->Self:
@@ -84,7 +85,7 @@ class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
         return self
 
     def build_worker(self)->SplitWorker:
-        return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn)
+        return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn, expansion_factor=self.expansion_factor)
 
 
 def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
@@ -111,8 +112,7 @@ class LocalFlowEngine:
 
     async def process_workers_and_downstream_workers(self, workers: List[Worker]):
         for worker in workers:
-            logging.debug(f'processing worker {worker} with {worker.input_queue.qsize()} waiting events')
-            await worker.process(10)
+            await worker.process()
             for downstream_worker_group in worker.next_workers:
                 # note we are calling init too many times
                 await self.process_workers_and_downstream_workers(downstream_worker_group)
