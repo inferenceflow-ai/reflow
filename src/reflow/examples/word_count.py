@@ -56,9 +56,11 @@ class TestDataConnection(Generic[T]):
 async def data_source(data):
     return TestDataConnection(data)
 
-async def debug_sink(events: List[str])-> None:
+async def debug_sink(events: List[str])-> int:
     for event in events:
         print(f'EVENT: {event}')
+
+    return len(events)
 
 
 # noinspection PyUnusedLocal
@@ -83,7 +85,7 @@ asyncio.run(main())
 
 # TODO
 #
-# 1. Need to deal with QueueFull by retrying input events that produced the output events that couldn't be saved.
+# 1. DONE Need to deal with QueueFull by retrying input events that produced the output events that couldn't be saved.
 # 2. Expansion factor is critical to flow control - is there a better way to compute it ?
 # 3. If the queue is remote, there will be a cost to checking it's size.  The performance penalty may be unacceptable.
 #    In that case, is there a better way to estimate the downstream capacity ?  Can we send it back from an enqueue
@@ -101,8 +103,10 @@ asyncio.run(main())
 # 12. Exception handling around all user provided functions (built into *Worker.process most likely).
 # 13. DONE Look at worker.py line 52, shouldn't ProducerFn be using the same type vars as those in worker ? Does it ?
 # 14. Sources and Sinks are likely to block the event loop and should be offloaded to a separate thread
-# 15. Sinks have no way to exert back-pressure
+# 15. DONE Sinks have no way to exert back-pressure
 # 16. Support re-joining - the inverse of splitting
+# 17. Refine logging to use different loggers for different parts of the program
+
 
 
 

@@ -78,11 +78,16 @@ def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[...,
     return wrapper
 
 
+DEFAULT_QUEUE_SIZE = 10000
+
+
 class LocalFlowEngine:
+    def __init__(self, queue_size:int = DEFAULT_QUEUE_SIZE):
+        self.queue_size = queue_size
 
     # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
     async def run(self, flow_stage: FlowStage):
-        builder = JobBuilder()
+        builder = JobBuilder(self.queue_size)
         workers = []
         builder.build_job(flow_stage, workers)
         for worker in workers:
@@ -92,9 +97,11 @@ class LocalFlowEngine:
             for worker in workers:
                 await worker.process()
 
-MAX_INPUT_QUEUE_SIZE = 10000
 
 class JobBuilder:
+    def __init__(self, queue_size):
+        self.queue_size = queue_size
+
     def build_job(self, stage: FlowStage, worker_list: List[Worker[Any]], input_queue: EventQueue = None)->None:
         # Create the workers for this stage, then create the output queue and connect the workers.
         # Finally, for the subsequent stages, connect them to the input queue and repeat recursively.
@@ -104,7 +111,7 @@ class JobBuilder:
             worker.input_queue = input_queue
 
         if not isinstance(stage, EventSink):
-            output_queue = LocalEventQueue(MAX_INPUT_QUEUE_SIZE)
+            output_queue = LocalEventQueue(self.queue_size)
             worker.output_queue = output_queue
             for downstream_stage in stage.downstream_stages:
                 self.build_job(downstream_stage, worker_list, output_queue)

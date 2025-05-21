@@ -86,14 +86,32 @@ class SinkWorker(Worker[IN_EVENT_TYPE], Generic[IN_EVENT_TYPE, STATE_TYPE]):
         envelopes = await self.input_queue.get_events(self.id)
         logging.debug(f'{self} processing {len(envelopes)} events')
 
+        # The event_count_map maps input events to the number of output events produced.  In this case, each input
+        # event can produce 0 or 1 output events.  This information is used later to determine how many input events
+        # to acknowledge
+        event_count_map = [1 if envelope.instruction == INSTRUCTION.PROCESS_EVENT else 0 for envelope in envelopes]
+
         events = [envelope.event for envelope in envelopes if envelope.instruction == INSTRUCTION.PROCESS_EVENT]
         if self.state:
-            await self.consumer_fn(self.state, events)
+            consumed = await self.consumer_fn(self.state, events)
         else:
-            await self.consumer_fn(events)
+            consumed = await self.consumer_fn(events)
 
-        await self.input_queue.acknowledge_events(self.id, len(envelopes))
+        if consumed == len(events):
+            await self.input_queue.acknowledge_events(self.id, len(envelopes))
+        elif consumed > 0:
+            events_to_acknowledge = 0
+            events_encountered = 0
+            for c in event_count_map:
+                events_encountered += c
+                events_to_acknowledge += 1
+                if events_encountered == consumed:
+                    break
 
+            logging.warning(f'Sink consumed {consumed} events out of {len(events)} possible. {events_to_acknowledge} out of {len(envelopes)} input events will be  acknowledged')
+            await self.input_queue.acknowledge_events(self.id, events_to_acknowledge)
+        else:
+            logging.warning("Sink consumed 0 events")
 
 class SplitWorker(Worker[IN_EVENT_TYPE], Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, split_fn: SplitFn, expansion_factor: int, init_fn: InitFn = None):
