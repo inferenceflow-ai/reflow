@@ -1,11 +1,9 @@
-import logging
 from abc import abstractmethod
-from typing import Generic, Callable, Awaitable, List, Self
+from typing import Generic, Callable, Awaitable, Self, Any, List
 
-from internal import SplitWorker
-from .internal import Worker, SourceWorker, SinkWorker
-
-from typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
+from internal.event_queue import LocalEventQueue, EventQueue
+from .internal.worker import Worker, SourceWorker, SinkWorker, SplitWorker
+from .typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
 
 
 class FlowStage:
@@ -19,29 +17,8 @@ class FlowStage:
         return next_stage
 
     @abstractmethod
-    def build_worker(self) ->Worker:
+    def build_worker(self)->Worker[Any]:
         pass
-
-    def build_flow(self)->List[Worker]:
-        """
-        Recursively builds and connects the workers for downstream stages. The return value is the list of Workers
-        for this stage, with all downstream workers connected.
-        """
-        downstream_workers = []
-        for stage in self.downstream_stages:
-            downstream_workers.append(stage.build_flow())
-
-        # downstream workers now contains a list of worker lists
-        # there is one entry in the outer list for each downstream stage consisting of the list of workers for that stage
-
-        # currently we build only one worker per stage
-        result = [self.build_worker()]
-
-        for worker in result:
-            for worker_list in downstream_workers:
-                worker.add_worker_group(worker_list)
-
-        return result
 
 
 class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
@@ -53,7 +30,7 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.producer_fn = producer_fn
         return self
 
-    def build_worker(self)->SourceWorker:
+    def build_worker(self)->SourceWorker[EVENT_TYPE, STATE_TYPE]:
         return SourceWorker(init_fn=self.init_fn, producer_fn=self.producer_fn)
 
 
@@ -66,7 +43,7 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.consumer_fn = consumer_fn
         return self
 
-    def build_worker(self)->SinkWorker:
+    def build_worker(self)->SinkWorker[EVENT_TYPE, STATE_TYPE]:
         return SinkWorker(init_fn=self.init_fn, consumer_fn=self.consumer_fn)
 
     def send_to(self, next_stage: "EventSink"):
@@ -84,7 +61,7 @@ class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
         self.split_fn = split_fn
         return self
 
-    def build_worker(self)->SplitWorker:
+    def build_worker(self)->SplitWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
         return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn, expansion_factor=self.expansion_factor)
 
 
@@ -103,23 +80,31 @@ def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[...,
 
 class LocalFlowEngine:
 
-    async def init_workers_and_downstream_workers(self, workers: List[Worker]):
+    # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
+    async def run(self, flow_stage: FlowStage):
+        builder = JobBuilder()
+        workers = []
+        builder.build_job(flow_stage, workers)
         for worker in workers:
             await worker.init()
-            for downstream_worker_group in worker.next_workers:
-                # note we are calling init too many times
-                await self.init_workers_and_downstream_workers(downstream_worker_group)
 
-    async def process_workers_and_downstream_workers(self, workers: List[Worker]):
-        for worker in workers:
-            await worker.process()
-            for downstream_worker_group in worker.next_workers:
-                # note we are calling init too many times
-                await self.process_workers_and_downstream_workers(downstream_worker_group)
-
-    async def run(self, flow: FlowStage):
-        workers = flow.build_flow()
-        await self.init_workers_and_downstream_workers(workers)
         while True:
-            await self.process_workers_and_downstream_workers(workers)
+            for worker in workers:
+                await worker.process()
 
+MAX_INPUT_QUEUE_SIZE = 10000
+
+class JobBuilder:
+    def build_job(self, stage: FlowStage, worker_list: List[Worker[Any]], input_queue: EventQueue = None)->None:
+        # Create the workers for this stage, then create the output queue and connect the workers.
+        # Finally, for the subsequent stages, connect them to the input queue and repeat recursively.
+        worker = stage.build_worker()
+        worker_list.append(worker)
+        if input_queue:
+            worker.input_queue = input_queue
+
+        if not isinstance(stage, EventSink):
+            output_queue = LocalEventQueue(MAX_INPUT_QUEUE_SIZE)
+            worker.output_queue = output_queue
+            for downstream_stage in stage.downstream_stages:
+                self.build_job(downstream_stage, worker_list, output_queue)

@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import random
-from logging import DEBUG
 from typing import List, TypeVar, Generic
+
 from reflow import flow_connector, EventSource, EventSink, LocalFlowEngine, Splitter
 
 hamlet_sentences =  [
@@ -60,6 +60,8 @@ async def debug_sink(events: List[str])-> None:
     for event in events:
         print(f'EVENT: {event}')
 
+
+# noinspection PyUnusedLocal
 async def null_sink(events: List[str])-> None:
     pass
 
@@ -69,17 +71,40 @@ async def split_fn(sentence):
 
 async def main():
     source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
-    splitter = Splitter(expansion_factor=50).with_split_fn(split_fn)
+    splitter = Splitter(expansion_factor=1).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(sink)
 
     flow_engine = LocalFlowEngine()
     await flow_engine.run(source)
 
-logging.basicConfig()
+logging.basicConfig(level=logging.WARNING)
 asyncio.run(main())
 
 # TODO
 #
-# 1. Need to deal with QueueFull
+# 1. Need to deal with QueueFull by retrying input events that produced the output events that couldn't be saved.
 # 2. Expansion factor is critical to flow control - is there a better way to compute it ?
+# 3. If the queue is remote, there will be a cost to checking it's size.  The performance penalty may be unacceptable.
+#    In that case, is there a better way to estimate the downstream capacity ?  Can we send it back from an enqueue
+#    call and have the upstream estimate ?
+# 4. DONE Make the event queue test into actual tests (e.g. using pytest, doctest)
+# 5. Support multiple workers in different processes
+# 6. Support multiple workers in different machines
+# 7. Support ordering
+# 8. DONE - Modify event queue to support a dictionary of offsets.  Only discard entries earlier than the earliest
+#    acknowledged offset
+# 9. Implement internal idempotency via event ids and recent event cache
+# 10. I need to move the event counting mechanism into common code
+# 11. Think about what, if anything, can be done with sources when all received events can't be saved to the output
+#     queue. For this case, the source needs to be rewindable.
+# 12. Exception handling around all user provided functions (built into *Worker.process most likely).
+# 13. DONE Look at worker.py line 52, shouldn't ProducerFn be using the same type vars as those in worker ? Does it ?
+# 14. Sources and Sinks are likely to block the event loop and should be offloaded to a separate thread
+# 15. Sinks have no way to exert back-pressure
+# 16. Support re-joining - the inverse of splitting
+
+
+
+
+
