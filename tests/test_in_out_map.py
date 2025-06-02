@@ -9,12 +9,18 @@ def test_basic():
     in_out_map.record_no_producer_event()
     in_out_map.record_batch(2,3)
 
-    assert in_out_map.acknowledgeable_in_events(0) == 0
+    assert in_out_map.acknowledgeable_in_events(0, trim=False) == 0
+    assert in_out_map.acknowledgeable_in_events(1, trim=False) == 2
+    assert in_out_map.acknowledgeable_in_events(2, trim=False) == 2
+    assert in_out_map.acknowledgeable_in_events(3, trim=False) == 2
+    assert in_out_map.acknowledgeable_in_events(4, trim=False) == 3
+    assert in_out_map.acknowledgeable_in_events(5, trim=False) == 3
+    assert in_out_map.acknowledgeable_in_events(6, trim=False) == 3
+    assert in_out_map.acknowledgeable_in_events(7, trim=False) == 3
+    assert in_out_map.acknowledgeable_in_events(8, trim=False) == 5
+
     assert in_out_map.acknowledgeable_in_events(1) == 2
-    assert in_out_map.acknowledgeable_in_events(2) == 2
+    assert in_out_map.acknowledgeable_in_events(5) == 1
+    assert in_out_map.acknowledgeable_in_events(2) == 0
     assert in_out_map.acknowledgeable_in_events(3) == 2
-    assert in_out_map.acknowledgeable_in_events(4) == 3
-    assert in_out_map.acknowledgeable_in_events(5) == 3
-    assert in_out_map.acknowledgeable_in_events(6) == 3
-    assert in_out_map.acknowledgeable_in_events(7) == 3
-    assert in_out_map.acknowledgeable_in_events(8) == 5
+    
