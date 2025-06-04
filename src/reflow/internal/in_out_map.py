@@ -48,6 +48,8 @@ class InOutMap:
         # in_count and out_count point to the contents of that entry
         if trim:
             del self.event_mappings[0:i+1]
+            self.delivered_out_events -= out_count
+            self.processed_in_events -= in_count
             for n in range(len(self.event_mappings)):
                 ii, oo = self.event_mappings[n]
                 self.event_mappings[n] = (ii - in_count, oo - out_count)

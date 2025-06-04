@@ -23,4 +23,15 @@ def test_basic():
     assert in_out_map.acknowledgeable_in_events(5) == 1
     assert in_out_map.acknowledgeable_in_events(2) == 0
     assert in_out_map.acknowledgeable_in_events(3) == 2
-    
+
+def test_empty_then_full():
+    in_out_map = InOutMap()
+    for _  in range(3):
+        in_out_map.record_1_1()
+
+    assert in_out_map.acknowledgeable_in_events(3) == 3
+
+    for _  in range(3):
+        in_out_map.record_1_1()
+
+    assert in_out_map.acknowledgeable_in_events(3) == 3
