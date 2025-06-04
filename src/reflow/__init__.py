@@ -1,3 +1,4 @@
+import logging
 from abc import abstractmethod
 from typing import Generic, Callable, Awaitable, Self, Any, List
 
@@ -65,7 +66,7 @@ class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
         return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn, expansion_factor=self.expansion_factor)
 
 
-def flow_connector(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
+def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
     """
     A decorator that is used to create custom connections to outside services.
     """
@@ -93,9 +94,14 @@ class LocalFlowEngine:
         for worker in workers:
             await worker.init()
 
-        while True:
+        while len(workers) > 0:
             for worker in workers:
-                await worker.process()
+                if not worker.finished:
+                    await worker.process()
+                else:
+                    workers.remove(worker)
+
+        logging.info("No workers are active.  Exiting.")
 
 
 class JobBuilder:

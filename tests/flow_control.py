@@ -2,7 +2,8 @@ import asyncio
 import logging
 from typing import List, TypeVar, Generic
 
-from reflow import flow_connector, EventSource, EventSink, LocalFlowEngine
+from reflow import flow_connector_factory, EventSource, EventSink, LocalFlowEngine
+from typedefs import EndOfStreamException
 
 # a source emits events consisting of the numbers 1-100 in order.
 # a sink prints out what it receives.
@@ -17,7 +18,7 @@ class TestSource(Generic[T]):
 
     async def get_data(self, max_items: int)->List[T]:
         if self.next >= len(self.data):
-            return []
+            raise EndOfStreamException()
 
         limit = min(len(self.data), self.next + max_items)
         result = self.data[self.next:limit]
@@ -25,13 +26,16 @@ class TestSource(Generic[T]):
         return result
 
 
-@flow_connector
+@flow_connector_factory
 async def data_source(data):
     return TestSource(data)
 
 
-async def slow_debug_sink(events: List[str])-> None:
-    limit = int(len(events) / 2)
+async def slow_debug_sink(events: List[str])-> int:
+    if len(events) == 0:
+        return 0
+
+    limit = max(int(len(events) / 2), 1)
     for event in events[0:limit]:
         print(f'EVENT: {event}')
 
