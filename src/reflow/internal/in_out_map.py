@@ -12,6 +12,13 @@ class InOutMap:
     def record_1_1(self):
         self.record_batch(1, 1)
 
+    def record_1_1s(self, count: int):
+        if count < 0:
+            raise ValueError('count must be non-negative')
+
+        for _ in range(count):
+            self.record_batch(1, 1)
+
     def record_filtered_event(self):
         self.record_batch(1, 0)
 
