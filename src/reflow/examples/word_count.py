@@ -74,7 +74,7 @@ async def split_fn(sentence):
 
 async def main():
     source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
-    splitter = Splitter(expansion_factor=1).with_split_fn(split_fn)
+    splitter = Splitter(expansion_factor=20).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(sink)
 
@@ -160,6 +160,9 @@ asyncio.run(main())
 # 29. Test: does a single, filtered event ever get acked ?
 # 30  I would like to collapse things like reflow.internal.in_out_map.InOutMap into reflow.internal but last
 #     time I tried it was a mess.  Revisit.
+# 31. Expose metrics to allow watching the size of the various queues.  The metric should be job specific and
+#     then worker specific.  It would be nice if there were a task-level rollup. So job/task/worker
+# 32. All mid-stream workers must send processing instructions down stream.
 
 # The back-pressure algorithm
 # - check output event list
