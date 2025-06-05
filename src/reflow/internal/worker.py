@@ -182,5 +182,5 @@ class SplitWorker(Worker[IN_EVENT_TYPE], Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, 
         if len(self.unsent_out_events) > 0:
             delivered = await self.output_queue.enqueue(self.unsent_out_events)
             input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(delivered)
-            await self.input_queue.acknowledge_events(input_events_to_acknowledge)
+            await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
 
