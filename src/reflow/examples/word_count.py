@@ -45,12 +45,6 @@ And lose the name of action"""]
 
 T = TypeVar("T")
 
-class TestDataConnection(Generic[T]):
-    def __init__(self, data: List[T]):
-        self.data = data
-
-    async def get_data(self, max_items: int)->List[T]:
-        return random.choices(self.data, k=max_items)
 
 class TestDataConnection(Generic[T]):
     def __init__(self, data: List[T]):
@@ -58,7 +52,6 @@ class TestDataConnection(Generic[T]):
 
     async def get_data(self, max_items: int)->List[T]:
         return random.choices(self.data, k=max_items)
-
 
 @flow_connector_factory
 async def data_source(data):
@@ -114,7 +107,7 @@ asyncio.run(main())
 # 15. DONE Sinks have no way to exert back-pressure
 # 16. Support re-joining - the inverse of splitting
 # 17. Refine logging to use different loggers for different parts of the program
-# 18. Figure out how to automate tests like the retry test
+# 18. DONE Figure out how to automate tests like the retry test
 # 19. DONE Support jobs that end (probably with sources that end).  Insert a shutdown instruction in the stream.  As
 #     each processor encounters it, it shuts down. Sub-problem: typically, a group of events will be processed
 #     and then, as a group, submitted to the output queue.  What happens if, at the end of the "process" method,
