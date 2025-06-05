@@ -5,9 +5,9 @@ from enum import Enum
 from types import NoneType
 from typing import Generic, List
 
-from internal.in_out_map import InOutMap
-from typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, \
-    EndOfStreamException
+from reflow.internal.in_out_map import InOutMap
+from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
+    OUT_EVENT_TYPE, EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10000

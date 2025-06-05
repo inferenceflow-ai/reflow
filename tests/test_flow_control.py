@@ -1,0 +1,69 @@
+import asyncio
+from typing import List, TypeVar, Generic
+
+from reflow import flow_connector_factory, EventSource, EventSink, LocalFlowEngine
+from reflow.typedefs import EndOfStreamException
+
+# a source emits events consisting of the numbers 1-100 in order.
+# a sink prints out what it receives.
+
+
+T = TypeVar("T")
+
+class ListSource(Generic[T]):
+    def __init__(self, data: List[T]):
+        self.data = data
+        self.next = 0
+
+    async def get_data(self, max_items: int)->List[T]:
+        if self.next >= len(self.data):
+            raise EndOfStreamException()
+
+        limit = min(len(self.data), self.next + max_items)
+        result = self.data[self.next:limit]
+        self.next = limit
+        return result
+
+
+class ListSink(Generic[T]):
+    def __init__(self, consumed_events: List[T]):
+        self.results = consumed_events
+
+    async def slow_sink(self, events: List[T])->int:
+        if len(events) == 0:
+            return 0
+
+        consumed_events = max(int(len(events) / 2), 1)
+        self.results.extend(events[0:consumed_events])
+
+        return consumed_events
+
+
+@flow_connector_factory
+async def data_source(data):
+    return ListSource(data)
+
+
+@flow_connector_factory
+async def sink(consumed_events: List[int]):
+    return ListSink(consumed_events)
+
+
+TEST_EVENT_COUNT = 100
+consumed_event_list = []
+source_event_list = [i for i in range(TEST_EVENT_COUNT)]
+
+async def main():
+    event_source = EventSource(data_source(source_event_list)).with_producer_fn(ListSource.get_data)
+    event_sink = EventSink(sink(consumed_event_list)).with_consumer_fn(ListSink.slow_sink)
+    event_source.send_to(event_sink)
+
+    flow_engine = LocalFlowEngine(queue_size=32)
+    await flow_engine.run(event_source)
+
+
+asyncio.run(main())
+
+
+def test_slow_sink():
+    assert consumed_event_list == source_event_list

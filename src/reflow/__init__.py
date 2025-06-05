@@ -2,7 +2,7 @@ import logging
 from abc import abstractmethod
 from typing import Generic, Callable, Awaitable, Self, Any, List
 
-from internal.event_queue import LocalEventQueue, EventQueue
+from .internal.event_queue import LocalEventQueue, EventQueue
 from .internal.worker import Worker, SourceWorker, SinkWorker, SplitWorker
 from .typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
 

@@ -165,6 +165,8 @@ asyncio.run(main())
 #     I ack to when I have acted on it (if its a p.i.) or successfully sent it to the out queue if its a
 #     regular event.
 # 29. Test: does a single, filtered event ever get acked ?
+# 30  I would like to collapse things like reflow.internal.in_out_map.InOutMap into reflow.internal but last
+#     time I tried it was a mess.  Revisit.
 
 # The back-pressure algorithm
 # - check output event list

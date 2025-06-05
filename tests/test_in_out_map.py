@@ -1,4 +1,4 @@
-from internal.in_out_map import InOutMap
+from reflow.internal.in_out_map import InOutMap
 
 
 def test_basic():

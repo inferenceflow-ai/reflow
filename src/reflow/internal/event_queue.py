@@ -1,7 +1,7 @@
 from collections import deque, defaultdict
 from typing import Protocol, TypeVar, List
 
-from internal.worker import Envelope
+from reflow.internal.worker import Envelope
 
 EVENT_TYPE = TypeVar('EVENT_TYPE')
 
