@@ -1,32 +1,13 @@
 from collections import deque, defaultdict
 from typing import Protocol, TypeVar, List
 
-from reflow.internal.worker import Envelope
+from reflow.internal import Envelope
 
 EVENT_TYPE = TypeVar('EVENT_TYPE')
 
-class EventQueue(Protocol[EVENT_TYPE]):
-    """
-    EventQueues are ordered, FIFO collections with a fixed size.
-    """
-    async def enqueue(self, events: List[EVENT_TYPE])->int:
-        """
-        Attempts to enqueue events.  If the remaining queue capacity is less than the number of events provided,
-        as many events as possible will be enqueued, starting with the first item in the event list and maintaining
-        order.
 
-        This method returns the number of items actually enqueued.  _It is very important that the caller check the
-        return value in order to avoid dropping events._
-        """
-        ...
-
-    async def remaining_capacity(self)->int:
-        """
-        Returns the remaining capacity in the queue (e.g. how many more events could be enqueued without loss).
-        """
-        ...
-
-    async def get_events(self, subscriber: str, limit: int = 0)->List[EVENT_TYPE]:
+class InputQueue(Protocol[EVENT_TYPE]):
+    async def get_events(self, subscriber: str, limit: int = 0)->List[Envelope[EVENT_TYPE]]:
         """
         Get up to limit events from the queue, starting with the first _unacknowledged_ event. If limit is not provided
         or is 0, all ready events will be returned.
@@ -49,7 +30,29 @@ class EventQueue(Protocol[EVENT_TYPE]):
         ...
 
 
-class LocalEventQueue(EventQueue[EVENT_TYPE]):
+class OutputQueue(Protocol[EVENT_TYPE]):
+    """
+    EventQueues are ordered, FIFO collections with a fixed size.
+    """
+    async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
+        """
+        Attempts to enqueue events.  If the remaining queue capacity is less than the number of events provided,
+        as many events as possible will be enqueued, starting with the first item in the event list and maintaining
+        order.
+
+        This method returns the number of items actually enqueued.  _It is very important that the caller check the
+        return value in order to avoid dropping events._
+        """
+        ...
+
+    async def remaining_capacity(self)->int:
+        """
+        Returns the remaining capacity in the queue (e.g. how many more events could be enqueued without loss).
+        """
+        ...
+
+
+class LocalEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE]):
     def __init__(self, capacity: int):
         self.events = deque(maxlen=capacity)
         self.next_event = defaultdict(lambda: -1)

@@ -1,26 +1,17 @@
-import logging
 import uuid
 from abc import ABC, abstractmethod
-from enum import Enum
-from types import NoneType
 from typing import Generic, List
 
+from reflow.internal import Envelope, INSTRUCTION
+from reflow.internal.event_queue import OutputQueue, InputQueue
 from reflow.internal.in_out_map import InOutMap
 from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
-    OUT_EVENT_TYPE, EndOfStreamException
+    OUT_EVENT_TYPE
+from reflow.typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10000
 
-class INSTRUCTION(Enum):
-    PROCESS_EVENT = 1
-    END_OF_STREAM = 2
-
-
-class Envelope(Generic[EVENT_TYPE]):
-    def __init__(self, instruction: INSTRUCTION, event: EVENT_TYPE = None):
-        self.instruction = instruction
-        self.event = event
 
 # The back-pressure algorithm
 # - check output event list
@@ -36,7 +27,7 @@ class Envelope(Generic[EVENT_TYPE]):
 #  - after this, some events may remain in the output event list
 #
 
-class Worker(ABC, Generic[IN_EVENT_TYPE]):
+class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, init_fn: InitFn = None, expansion_factor = 1):
         self.init_fn = init_fn
         self.state = None
@@ -64,123 +55,147 @@ class Worker(ABC, Generic[IN_EVENT_TYPE]):
         batch_size = await self.input_batch_size()
         return await self.input_queue.get_events(self.id, batch_size)
 
-    @abstractmethod
     async def process(self)->None:
+        if len(self.unsent_out_events) == 0:
+            events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
+            ready_events = await self.input_queue.get_events(self.id, events_to_read)
+
+            # Regular events get passed through to the transform function but processing instructions
+            # get processed at this level.
+
+            for envelope in ready_events:
+                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                    output = self.handle_event(envelope)
+                    self.unsent_out_events.extend(output)
+                    self.in_out_map.record_split_event(len(output))
+                elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                    self.finished = True
+                    self.in_out_map.record_1_1()
+                    self.unsent_out_events.append(envelope)
+                else:
+                    raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+
+        if len(self.unsent_out_events) > 0:
+            consumed_events = await self.output_queue.enqueue(self.unsent_out_events)
+            if consumed_events > 0:
+                del self.unsent_out_events[0:consumed_events]
+                input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(consumed_events)
+                await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
+
+    @abstractmethod
+    def handle_event(self, event: Envelope[IN_EVENT_TYPE])->List[Envelope[EVENT_TYPE]]:
         pass
 
-
-class SourceWorker(Worker[NoneType], Generic[EVENT_TYPE, STATE_TYPE]):
+class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, producer_fn: ProducerFn, init_fn: InitFn = None):
         Worker.__init__(self, init_fn)
         self.producer_fn = producer_fn
 
-    async def process(self):
-        if len(self.unsent_out_events) == 0:
-            batch_size = await self.input_batch_size()
-            try:
-                if self.state:
-                    ready_events = await self.producer_fn(self.state, batch_size)
-                else:
-                    ready_events = await self.producer_fn(batch_size)
+    async def init(self):
+        await super().init()
+        self.input_queue = SourceAdapter(self.producer_fn, self.state)
 
-                logging.debug(f'{self} producing {len(ready_events)} events')
-
-                # put an envelope around each event and add it to unsent_out_events
-                self.unsent_out_events.extend([Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in ready_events])
-                self.in_out_map.record_batch(len(ready_events), len(ready_events))
-            except EndOfStreamException as x:
-                self.unsent_out_events.append(Envelope(INSTRUCTION.END_OF_STREAM))
-                self.in_out_map.record_no_producer_event()
-                self.finished = True
-
-        if len(self.unsent_out_events) > 0:
-            delivered = await self.output_queue.enqueue(self.unsent_out_events)
-            del self.unsent_out_events[0:delivered]
-            # current version of source does not support acknowledgements back to the event producer
-            # we only call acknowledgeable_in_events to clean up the in_out_map
-
-            # noinspection PyUnusedLocal
-            inputs_to_acknowledge = self.in_out_map.acknowledgeable_in_events(delivered)
+    def handle_event(self, event: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
+        # sources do not currently transform events
+        return [event]
 
 
-class SinkWorker(Worker[IN_EVENT_TYPE], Generic[IN_EVENT_TYPE, STATE_TYPE]):
+class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, consumer_fn: ConsumerFn, init_fn: InitFn = None):
         Worker.__init__(self, init_fn)
         self.consumer_fn = consumer_fn
 
-    async def get_ready_events(self)->List[Envelope[IN_EVENT_TYPE]]:
-        return await self.input_queue.get_events(self.id, MAX_BATCH_SIZE)
+    async def init(self):
+        await super().init()
+        self.output_queue = SinkAdapter(self.consumer_fn, self.state)
 
-    async def process(self):
-        if len(self.unsent_out_events) == 0:
-            self.unsent_out_events = await self.get_ready_events()
-            self.in_out_map.record_1_1s(len(self.unsent_out_events))
-
-        if len(self.unsent_out_events) > 0:
-            # Now deliver unsent_out_events to the consumer
-            # find the first special instruction
-            first_special_instruction_index = len(self.unsent_out_events)
-            for i, envelope in enumerate(self.unsent_out_events):
-                if envelope.instruction != INSTRUCTION.PROCESS_EVENT:
-                    first_special_instruction_index = i
-                    break
-
-            if first_special_instruction_index < len(self.unsent_out_events):
-                special_instruction = self.unsent_out_events[first_special_instruction_index].instruction
-            else:
-                special_instruction = None
-
-            # deliver up to the first special instruction
-            events_to_deliver = [envelope.event for envelope in self.unsent_out_events[0:first_special_instruction_index]]
-            logging.debug(f'{self} attempting to send  {len(events_to_deliver)} to consumer')
-            if self.state:
-                consumed = await self.consumer_fn(self.state, events_to_deliver)
-            else:
-                consumed = await self.consumer_fn(events_to_deliver)
-
-            logging.debug(f'{self} delivered  {consumed} to consumer')
-
-            del self.unsent_out_events[0:consumed]
-            input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(consumed)
-            assert input_events_to_acknowledge == consumed
-            await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
-
-            # process the special instruction if all events before it were delivered
-            if consumed == len(events_to_deliver) and special_instruction is not None:
-                assert special_instruction == INSTRUCTION.END_OF_STREAM
-                self.finished = True
-                del self.unsent_out_events[0]
-                input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(1)
-                assert input_events_to_acknowledge == 1
-                await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
+    def handle_event(self, event: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
+        # sinks do not currently transform events
+        return [event]
 
 
-class SplitWorker(Worker[IN_EVENT_TYPE], Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
+class SplitWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, split_fn: SplitFn, expansion_factor: int, init_fn: InitFn = None):
         Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor)
         self.split_fn = split_fn
 
-    async def process(self):
-        if len(self.unsent_out_events) == 0:
-            in_envelopes = await self.get_ready_events()
-            logging.debug(f'{self} processing {len(in_envelopes)} events')
-            for envelope in in_envelopes:
-                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                    if self.state:
-                        parts = await self.split_fn(self.state, envelope.event)
-                    else:
-                        parts = await self.split_fn(envelope.event)
+    def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:
+        if self.state:
+            result =  self.split_fn(self.state, envelope.event)
+        else:
+            result = self.split_fn(envelope.event)
 
-                    self.unsent_out_events.extend([Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in parts])
-                    self.in_out_map.record_split_event(len(parts))
-                else:
-                    self.in_out_map.record_filtered_event()
-                    if envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                        self.finished = True
-                        break
+        return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
 
-        if len(self.unsent_out_events) > 0:
-            delivered = await self.output_queue.enqueue(self.unsent_out_events)
-            input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(delivered)
-            await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
 
+# The functions of the SourceAdapter are to emulate an input queue and to put envelopes around the raw events
+class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
+    def __init__(self, producer_fn: ProducerFn, state: STATE_TYPE = None):
+        self.producer_fn = producer_fn
+        self.state = state
+
+    async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
+        try:
+            if self.state:
+                result = await self.producer_fn(self.state, limit)
+            else:
+                result = await self.producer_fn(limit)
+
+            return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
+        except EndOfStreamException:
+            return [Envelope(INSTRUCTION.END_OF_STREAM)]
+
+    # this class does not support "acknowledge" functionality
+    async def acknowledge_events(self, subscriber: str, n: int) -> None:
+        pass
+
+
+# The functions of the SinkAdapter are to emulate an OutputQueue and to remove envelopes from the raw events
+# before sending them to the consumer - note that it will swallow processing instructions without
+# processing them.  The choice to send processing instructions to the SinkAdapter was made because there
+# is a need to accurately acknowledge consumed events, both regular and processing instructions, also there
+# is a need to maintain ordering of all events and lastly, its important to send batches of events to the
+# consumer whenever possible.
+#
+# The option of just removing the processing instructions from the stream would result in missing or mis-aligned
+# acknowledgements back to the input.  Each event of either type must be specifically acknowledged in sequence.
+# One option would be to just iterate through the batch of events one at a time, forwarding only the regular events,
+# acknowledging those as the consumer consumes them and handling processing instruction acknowledgements outside
+# the Sink Adapter but we need to send to the consumer in batches. So, we walk through the list of events in
+# order, assembling batches of contiguous regular events and sending them to the consumer, acknowledging the
+# corresponding input events, and then handling any intervening processing instructions outside the consumer.
+#
+# In reality, if the SinkAdapter is given a mix of processing instructions and regular events, it will consume
+# the first processing instruction or batch and send back the appropriate count from the enqueue method.  This
+# is mainly because there is only one return value available.  Anything remaining will stay in the workers
+# unsent events list and the process will continue next time the worker gets a turn.
+#
+class SinkAdapter(Generic[STATE_TYPE, EVENT_TYPE], OutputQueue[EVENT_TYPE]):
+    def __init__(self, consumer_fn: ConsumerFn, state: STATE_TYPE = None):
+        self.consumer_fn = consumer_fn
+        self.state = state
+
+    async def enqueue(self, events: List[Envelope[EVENT_TYPE]]) -> int:
+        if len(events) == 0:
+            return 0
+
+        next_processing_instruction_index = len(events)
+        for i, event in enumerate(events):
+            if event.instruction != INSTRUCTION.PROCESS_EVENT:
+                next_processing_instruction_index = i
+                break
+
+        if next_processing_instruction_index == 0:
+            return 1
+        else:
+            batch = [envelope.event for envelope in events[0:next_processing_instruction_index]]
+            if self.state:
+                result = await self.consumer_fn(self.state, batch)
+            else:
+                result = await  self.consumer_fn(batch)
+
+        return result
+
+
+    async def remaining_capacity(self) -> int:
+        return MAX_BATCH_SIZE

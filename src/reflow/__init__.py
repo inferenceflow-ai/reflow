@@ -2,7 +2,7 @@ import logging
 from abc import abstractmethod
 from typing import Generic, Callable, Awaitable, Self, Any, List
 
-from .internal.event_queue import LocalEventQueue, EventQueue
+from .internal.event_queue import LocalEventQueue, InputQueue
 from .internal.worker import Worker, SourceWorker, SinkWorker, SplitWorker
 from .typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
 
@@ -18,7 +18,7 @@ class FlowStage:
         return next_stage
 
     @abstractmethod
-    def build_worker(self)->Worker[Any]:
+    def build_worker(self)->Worker[Any, Any, Any]:
         pass
 
 
@@ -31,7 +31,7 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.producer_fn = producer_fn
         return self
 
-    def build_worker(self)->SourceWorker[EVENT_TYPE, STATE_TYPE]:
+    def build_worker(self)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SourceWorker(init_fn=self.init_fn, producer_fn=self.producer_fn)
 
 
@@ -44,7 +44,7 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.consumer_fn = consumer_fn
         return self
 
-    def build_worker(self)->SinkWorker[EVENT_TYPE, STATE_TYPE]:
+    def build_worker(self)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SinkWorker(init_fn=self.init_fn, consumer_fn=self.consumer_fn)
 
     def send_to(self, next_stage: "EventSink"):
@@ -96,7 +96,7 @@ class LocalFlowEngine:
 
         while len(workers) > 0:
             for worker in workers:
-                if not worker.finished:
+                if not worker.finished or len(worker.unsent_out_events) > 0:
                     await worker.process()
                 else:
                     workers.remove(worker)
@@ -108,7 +108,7 @@ class JobBuilder:
     def __init__(self, queue_size):
         self.queue_size = queue_size
 
-    def build_job(self, stage: FlowStage, worker_list: List[Worker[Any]], input_queue: EventQueue = None)->None:
+    def build_job(self, stage: FlowStage, worker_list: List[Worker[Any, Any, Any]], input_queue: InputQueue = None)->None:
         # Create the workers for this stage, then create the output queue and connect the workers.
         # Finally, for the subsequent stages, connect them to the input queue and repeat recursively.
         worker = stage.build_worker()
