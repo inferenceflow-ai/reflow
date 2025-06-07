@@ -50,14 +50,14 @@ class TestDataConnection(Generic[T]):
     def __init__(self, data: List[T]):
         self.data = data
 
-    async def get_data(self, max_items: int)->List[T]:
+    def get_data(self, max_items: int)->List[T]:
         return random.choices(self.data, k=max_items)
 
 @flow_connector_factory
-async def data_source(data):
+def data_source(data):
     return TestDataConnection(data)
 
-async def debug_sink(events: List[str])-> int:
+def debug_sink(events: List[str])-> int:
     for event in events:
         print(f'EVENT: {event}')
 
@@ -65,7 +65,7 @@ async def debug_sink(events: List[str])-> int:
 
 
 # noinspection PyUnusedLocal
-async def null_sink(events: List[str])-> None:
+def null_sink(events: List[str])-> None:
     pass
 
 
@@ -103,7 +103,7 @@ asyncio.run(main())
 #     queue. For this case, the source needs to be rewindable.
 # 12. Exception handling around all user provided functions (built into *Worker.process most likely).
 # 13. DONE Look at worker.py line 52, shouldn't ProducerFn be using the same type vars as those in worker ? Does it ?
-# 14. Sources and Sinks are likely to block the event loop and should be offloaded to a separate thread
+# 14. DONE Sources and Sinks are likely to block the event loop and should be offloaded to a separate thread
 # 15. DONE Sinks have no way to exert back-pressure
 # 16. Support re-joining - the inverse of splitting
 # 17. Refine logging to use different loggers for different parts of the program

@@ -15,7 +15,7 @@ class ListSource(Generic[T]):
         self.data = data
         self.next = 0
 
-    async def get_data(self, max_items: int)->List[T]:
+    def get_data(self, max_items: int)->List[T]:
         if self.next >= len(self.data):
             raise EndOfStreamException()
 
@@ -29,7 +29,7 @@ class ListSink(Generic[T]):
     def __init__(self, consumed_events: List[T]):
         self.results = consumed_events
 
-    async def slow_sink(self, events: List[T])->int:
+    def slow_sink(self, events: List[T])->int:
         if len(events) == 0:
             return 0
 
@@ -40,12 +40,12 @@ class ListSink(Generic[T]):
 
 
 @flow_connector_factory
-async def data_source(data):
+def data_source(data):
     return ListSource(data)
 
 
 @flow_connector_factory
-async def sink(consumed_events: List[int]):
+def sink(consumed_events: List[int]):
     return ListSink(consumed_events)
 
 

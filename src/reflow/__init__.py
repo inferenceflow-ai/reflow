@@ -71,8 +71,8 @@ def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Calla
     A decorator that is used to create custom connections to outside services.
     """
     def wrapper(*args, **kwargs)->Callable[[],Awaitable[STATE_TYPE]]:
-        async def inner():
-            return await init_fn(*args, **kwargs)
+        def inner():
+            return init_fn(*args, **kwargs)
 
         return inner
 

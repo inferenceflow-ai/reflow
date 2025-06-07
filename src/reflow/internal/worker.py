@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from typing import Generic, List
@@ -40,7 +41,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
     async def init(self):
         if self.init_fn and not self.state:
-            self.state = await self.init_fn()
+            self.state = await asyncio.get_running_loop().run_in_executor(None, self.init_fn)
 
     async def input_batch_size(self)->int:
         """
@@ -133,9 +134,9 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
     async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
         try:
             if self.state:
-                result = await self.producer_fn(self.state, limit)
+                result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, self.state, limit)
             else:
-                result = await self.producer_fn(limit)
+                result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, limit)
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
         except EndOfStreamException:
@@ -186,9 +187,9 @@ class SinkAdapter(Generic[STATE_TYPE, EVENT_TYPE], OutputQueue[EVENT_TYPE]):
         else:
             batch = [envelope.event for envelope in events[0:next_processing_instruction_index]]
             if self.state:
-                result = await self.consumer_fn(self.state, batch)
+                result = await asyncio.get_running_loop().run_in_executor(None, self.consumer_fn, self.state, batch)
             else:
-                result = await  self.consumer_fn(batch)
+                result =await asyncio.get_running_loop().run_in_executor(None, self.consumer_fn, batch)
 
         return result
 
