@@ -145,12 +145,12 @@ asyncio.run(main())
 #     The problem with acknowledging an event count is that it is not idempotent.  It is entirely possible,
 #     in the event of a failure, that ... wait, maybe its OK.  In what case would I acknowledge the same
 #     event twice ?  Don't see this as a problem after all. Closing.
-# 25. Roll the output event list into the in/out map since they need to be manipulated together.
+# 25. DONE Roll the output event list into the in/out map since they need to be manipulated together.
 # 26. Analyze failure case: what if an operation on the queue fails (different from being full) ? What about
 #     acknowledge ?  Can the attached workers proceed ?  What should they do ?  Is it realistic for the queue
 #     to have intermittent failures ?
-# 27. Source and sink do not currently support filtering.  If this is added, handling of the in_out_map
-#     needs to be revisited for those workers.
+# 27. DONE Source and sink do not currently support filtering.  If this is added, handling of the in_out_map
+#     needs to be revisited for those workers. - The refactor, its not clear that this is still an issue.
 # 28. DONE - For processing instructions, they don't create an output event so they don't really factor into back pressure.
 #     Currently, if there is a list of events followed by a processing instruction, I'm acknowledging the
 #     input (the one for the processing instruction) when I process the last regular event, as if it were a
@@ -162,7 +162,8 @@ asyncio.run(main())
 #     time I tried it was a mess.  Revisit.
 # 31. Expose metrics to allow watching the size of the various queues.  The metric should be job specific and
 #     then worker specific.  It would be nice if there were a task-level rollup. So job/task/worker
-# 32. All mid-stream workers must send processing instructions down stream.
+# 32. DONE All mid-stream workers must send processing instructions down stream.
+# 33. DONE Refactor and simplify worker so the back pressure algorithm is implemented in only one place.
 
 # The back-pressure algorithm
 # - check output event list

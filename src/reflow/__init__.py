@@ -96,7 +96,7 @@ class LocalFlowEngine:
 
         while len(workers) > 0:
             for worker in workers:
-                if not worker.finished or len(worker.unsent_out_events) > 0:
+                if not worker.finished or len(worker.in_out_buffer.unsent_out_events) > 0:
                     await worker.process()
                 else:
                     workers.remove(worker)

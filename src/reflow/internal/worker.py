@@ -4,7 +4,7 @@ from typing import Generic, List
 
 from reflow.internal import Envelope, INSTRUCTION
 from reflow.internal.event_queue import OutputQueue, InputQueue
-from reflow.internal.in_out_map import InOutMap
+from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
 from reflow.typedefs import EndOfStreamException
@@ -36,8 +36,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         self.expansion_factor = expansion_factor
         self.id = uuid.uuid4()
         self.finished = False
-        self.in_out_map = InOutMap()
-        self.unsent_out_events = []
+        self.in_out_buffer = InOutBuffer()
 
     async def init(self):
         if self.init_fn and not self.state:
@@ -56,7 +55,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         return await self.input_queue.get_events(self.id, batch_size)
 
     async def process(self)->None:
-        if len(self.unsent_out_events) == 0:
+        if len(self.in_out_buffer.unsent_out_events) == 0:
             events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
             ready_events = await self.input_queue.get_events(self.id, events_to_read)
 
@@ -66,20 +65,17 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             for envelope in ready_events:
                 if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
                     output = self.handle_event(envelope)
-                    self.unsent_out_events.extend(output)
-                    self.in_out_map.record_split_event(len(output))
+                    self.in_out_buffer.record_split_event(output)
                 elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
                     self.finished = True
-                    self.in_out_map.record_1_1()
-                    self.unsent_out_events.append(envelope)
+                    self.in_out_buffer.record_1_1(envelope)
                 else:
                     raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
 
-        if len(self.unsent_out_events) > 0:
-            consumed_events = await self.output_queue.enqueue(self.unsent_out_events)
+        if len(self.in_out_buffer.unsent_out_events) > 0:
+            consumed_events = await self.output_queue.enqueue(self.in_out_buffer.unsent_out_events)
             if consumed_events > 0:
-                del self.unsent_out_events[0:consumed_events]
-                input_events_to_acknowledge = self.in_out_map.acknowledgeable_in_events(consumed_events)
+                input_events_to_acknowledge = self.in_out_buffer.record_delivered_out_events(consumed_events)
                 await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
 
     @abstractmethod
@@ -152,10 +148,10 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
 # The functions of the SinkAdapter are to emulate an OutputQueue and to remove envelopes from the raw events
 # before sending them to the consumer - note that it will swallow processing instructions without
-# processing them.  The choice to send processing instructions to the SinkAdapter was made because there
-# is a need to accurately acknowledge consumed events, both regular and processing instructions, also there
-# is a need to maintain ordering of all events and lastly, its important to send batches of events to the
-# consumer whenever possible.
+# processing them (they would have already been processed during the "transform" stage.  The choice to send processing
+# instructions to the SinkAdapter was made because there is a need to accurately acknowledge consumed events, both
+# regular and processing instructions, also there is a need to maintain ordering of all events and lastly, its
+# important to send batches of events to the consumer whenever possible.
 #
 # The option of just removing the processing instructions from the stream would result in missing or mis-aligned
 # acknowledgements back to the input.  Each event of either type must be specifically acknowledged in sequence.
@@ -195,7 +191,6 @@ class SinkAdapter(Generic[STATE_TYPE, EVENT_TYPE], OutputQueue[EVENT_TYPE]):
                 result = await  self.consumer_fn(batch)
 
         return result
-
 
     async def remaining_capacity(self) -> int:
         return MAX_BATCH_SIZE
