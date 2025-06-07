@@ -69,7 +69,7 @@ async def null_sink(events: List[str])-> None:
     pass
 
 
-async def split_fn(sentence):
+def split_fn(sentence):
     return sentence.split()
 
 async def main():
