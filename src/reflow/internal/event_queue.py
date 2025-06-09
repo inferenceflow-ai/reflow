@@ -65,7 +65,7 @@ class LocalEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE]):
     async def remaining_capacity(self)->int:
         return self.events.maxlen - len(self.events)
 
-    async def get_events(self, subscriber: str, limit: int = 0)->List[EVENT_TYPE]:
+    async def get_events(self, subscriber: str, limit: int = 0)->List[Envelope[EVENT_TYPE]]:
         if limit == 0:
             limit = self.events.maxlen
 
