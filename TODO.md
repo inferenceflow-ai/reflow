@@ -19,6 +19,7 @@
       time I tried it was a mess.  Revisit.
 - [ ] Expose metrics to allow watching the size of the various queues.  The metric should be job specific and
       then worker specific.  It would be nice if there were a task-level rollup. So job/task/worker
+- [ ] Error handling in event queues and especially the ZeroMQ event queue server and client
 - [x] Need to deal with QueueFull by retrying input events that produced the output events that couldn't be saved.
 - [x] Make the event queue test into actual tests (e.g. using pytest, doctest)
 - [x] Modify event queue to support a dictionary of offsets.  Only discard entries earlier than the earliest

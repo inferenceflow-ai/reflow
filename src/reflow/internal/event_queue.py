@@ -1,5 +1,6 @@
 from collections import deque, defaultdict
-from typing import Protocol, TypeVar, List
+from dataclasses import dataclass
+from typing import Protocol, TypeVar, List, Generic
 
 from reflow.internal import Envelope
 
@@ -92,4 +93,45 @@ class LocalEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE]):
             for k,v in self.next_event.items():
                 self.next_event[k] = v + num_to_pop
 
+
+@dataclass
+class EnqueueRequest(Generic[EVENT_TYPE]):
+    events: List[Envelope[EVENT_TYPE]]
+
+
+@dataclass
+class EnqueueResponse:
+    count: int
+
+
+@dataclass
+class RemainingCapacityRequest:
+    pass
+
+
+@dataclass
+class RemainingCapacityResponse:
+    count: int
+
+
+@dataclass
+class GetEventsRequest:
+    subscriber: str
+    limit: int
+
+
+@dataclass
+class GetEventsResponse(Generic[EVENT_TYPE]):
+    events: List[Envelope[EVENT_TYPE]]
+
+
+@dataclass
+class AcknowledgeEventsRequest:
+    subscriber: str
+    count: int
+
+
+@dataclass
+class AcknowledgeEventsResponse:
+    pass
 
