@@ -79,7 +79,7 @@ async def main():
     source.send_to(splitter).send_to(sink)
 
     flow_engine = LocalFlowEngine()
-    await flow_engine.run(source)
+    await flow_engine.deploy(source)
 
 logging.basicConfig(level=logging.WARNING)
 asyncio.run(main())

@@ -1,7 +1,8 @@
 import asyncio
 from typing import List, TypeVar, Generic
 
-from reflow import flow_connector_factory, EventSource, EventSink, LocalFlowEngine
+from reflow import flow_connector_factory, EventSource, EventSink
+from reflow.local_flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
 # a source emits events consisting of the numbers 1-100 in order.
@@ -58,8 +59,9 @@ async def main():
     event_sink = EventSink(sink(consumed_event_list)).with_consumer_fn(ListSink.slow_sink)
     event_source.send_to(event_sink)
 
-    flow_engine = LocalFlowEngine(queue_size=32)
-    await flow_engine.run(event_source)
+    flow_engine = FlowEngine(queue_size=32)
+    await flow_engine.deploy(event_source, exit_on_completion=True)
+    await flow_engine.run()
 
 
 asyncio.run(main())
