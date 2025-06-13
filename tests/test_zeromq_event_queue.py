@@ -4,22 +4,22 @@ from typing import Any, Awaitable
 import pytest
 
 from reflow.internal import wrap, unwrap
-from reflow.internal.zero_client import ZeroClientEventQueue
-from reflow.internal.zero_server import ZeroServerEventQueue
+from reflow.internal.event_queue_client import EventQueueClient
+from reflow.internal.event_queue_server import EventQueueServer
 
 
-async def run(server: ZeroServerEventQueue[Any], coro: Awaitable[Any])->Any:
+async def run(server: EventQueueServer[Any], coro: Awaitable[Any])->Any:
     result = await asyncio.gather(
         coro,
-        server.process_request()
+        server.serve()
     )
     return result[0]
 
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    with ZeroServerEventQueue(6, "ipc://sockets/basic_test") as server:
-        with ZeroClientEventQueue("ipc://sockets/basic_test") as client:
+    with EventQueueServer(6, ["ipc://sockets/basic_test"]) as server:
+        with EventQueueClient("ipc://sockets/basic_test") as client:
             await run(server, client.enqueue(wrap(["a","b","c"])))
 
             result = await run(server, client.get_events("frodo", 2))
