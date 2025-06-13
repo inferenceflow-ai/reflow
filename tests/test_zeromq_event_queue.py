@@ -18,8 +18,8 @@ async def run(server: ZeroServerEventQueue[Any], coro: Awaitable[Any])->Any:
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    with ZeroServerEventQueue(6, "ipc://basic_test") as server:
-        with ZeroClientEventQueue("ipc://basic_test") as client:
+    with ZeroServerEventQueue(6, "ipc://sockets/basic_test") as server:
+        with ZeroClientEventQueue("ipc://sockets/basic_test") as client:
             await run(server, client.enqueue(wrap(["a","b","c"])))
 
             result = await run(server, client.get_events("frodo", 2))
