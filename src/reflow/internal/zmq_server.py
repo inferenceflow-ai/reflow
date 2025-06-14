@@ -1,4 +1,6 @@
 import abc
+import asyncio
+from asyncio import CancelledError
 from typing import List, Any
 
 import zmq
@@ -10,11 +12,13 @@ class ZMQServer(abc.ABC):
         self.bind_addresses = bind_addresses
         self.context = None
         self.socket = None
+        self.task = None
 
-    async def serve(self):
-        request = await self.socket.recv_pyobj()
-        response = await self.process_request(request)
-        await self.socket.send_pyobj(response)
+    async def _serve(self):
+        while True:
+            request = await self.socket.recv_pyobj()
+            response = await self.process_request(request)
+            await self.socket.send_pyobj(response)
 
     @abc.abstractmethod
     async def process_request(self, request: Any)->Any:
@@ -26,9 +30,11 @@ class ZMQServer(abc.ABC):
         for bind_address in self.bind_addresses:
             self.socket.bind(bind_address)
 
+        self.task = asyncio.create_task(self._serve())
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
+        self.task.cancel()
         self.socket.close()
         self.context.term()
         return False
