@@ -3,7 +3,9 @@ import logging
 import random
 from typing import List, TypeVar, Generic
 
-from reflow import flow_connector_factory, EventSource, EventSink, LocalFlowEngine, Splitter
+from reflow import flow_connector_factory, EventSource, EventSink, Splitter
+from reflow.local_flow_engine import FlowEngine
+from typedefs import EndOfStreamException
 
 hamlet_sentences =  [
 """To be, or not to be, that is the question:
@@ -47,21 +49,45 @@ T = TypeVar("T")
 
 
 class TestDataConnection(Generic[T]):
-    def __init__(self, data: List[T]):
+    def __init__(self, data: List[T], stop_after: int = 0):
         self.data = data
+        self.count = 0
+        self.stop_after = stop_after
 
     def get_data(self, max_items: int)->List[T]:
-        return random.choices(self.data, k=max_items)
+        if self.stop_after > 0:
+            max_items = min(max_items, self.stop_after - self.count)
+
+        if max_items > 0:
+            return random.choices(self.data, k=max_items)
+
+        if self.stop_after > 0:
+            raise EndOfStreamException()
+
 
 @flow_connector_factory
-def data_source(data):
-    return TestDataConnection(data)
+def data_source(data, stop_after):
+    return TestDataConnection(data, stop_after)
 
 def debug_sink(events: List[str])-> int:
     for event in events:
         print(f'EVENT: {event}')
 
     return len(events)
+
+class CountingSink:
+    def __init__(self):
+        self.count = 0
+
+    def sink(self, events: List[str])->int:
+        result = len(events)
+        self.count += result;
+        return result
+
+
+@flow_connector_factory
+def new_counting_sink():
+    return CountingSink()
 
 
 # noinspection PyUnusedLocal
@@ -73,15 +99,17 @@ def split_fn(sentence):
     return sentence.split()
 
 async def main():
-    source = EventSource(data_source(hamlet_sentences)).with_producer_fn(TestDataConnection.get_data)
+    source = EventSource(data_source(hamlet_sentences, 10)).with_producer_fn(TestDataConnection.get_data)
     splitter = Splitter(expansion_factor=20).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(sink)
 
-    flow_engine = LocalFlowEngine()
-    await flow_engine.deploy(source)
+    flow_engine = FlowEngine()
+    await flow_engine.deploy(source, exit_on_completion=True)
+    await flow_engine.run()
 
-logging.basicConfig(level=logging.WARNING)
+
+logging.basicConfig(level=logging.DEBUG)
 asyncio.run(main())
 
 

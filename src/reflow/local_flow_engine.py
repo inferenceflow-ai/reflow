@@ -2,7 +2,8 @@ import argparse
 import asyncio
 from typing import List, Any
 
-from reflow import FlowStage, Worker, InputQueue, EventSink, LocalEventQueue
+from reflow import FlowStage, Worker, EventSink
+from reflow.internal.event_queue import InputQueue, LocalEventQueue
 
 DEFAULT_QUEUE_SIZE = 10000
 

@@ -139,7 +139,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
                 result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, limit)
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
-        except EndOfStreamException:
+        except EndOfStreamException as _:
             return [Envelope(INSTRUCTION.END_OF_STREAM)]
 
     # this class does not support "acknowledge" functionality
