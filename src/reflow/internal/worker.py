@@ -9,7 +9,7 @@ from reflow.internal.event_queue import OutputQueue, InputQueue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
-from typedefs import EndOfStreamException
+from reflow.typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10000
