@@ -5,7 +5,7 @@ from typing import List, TypeVar, Generic
 
 from reflow import flow_connector_factory, EventSource, EventSink, Splitter
 from reflow.local_flow_engine import FlowEngine
-from typedefs import EndOfStreamException
+from reflow.typedefs import EndOfStreamException
 
 hamlet_sentences =  [
 """To be, or not to be, that is the question:
@@ -59,6 +59,7 @@ class TestDataConnection(Generic[T]):
             max_items = min(max_items, self.stop_after - self.count)
 
         if max_items > 0:
+            self.count += max_items
             return random.choices(self.data, k=max_items)
 
         if self.stop_after > 0:
@@ -99,7 +100,7 @@ def split_fn(sentence):
     return sentence.split()
 
 async def main():
-    source = EventSource(data_source(hamlet_sentences, 10)).with_producer_fn(TestDataConnection.get_data)
+    source = EventSource(data_source(hamlet_sentences, 100000)).with_producer_fn(TestDataConnection.get_data)
     splitter = Splitter(expansion_factor=20).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(sink)
