@@ -77,13 +77,16 @@ def debug_sink(events: List[str])-> int:
 
     return len(events)
 
+word_count = 0
+
 class CountingSink:
     def __init__(self):
-        self.count = 0
+        pass
 
     def sink(self, events: List[str])->int:
+        global word_count
         result = len(events)
-        self.count += result;
+        word_count += result
         return result
 
 
@@ -102,9 +105,9 @@ def split_fn(sentence):
 
 async def main():
     t1 = time.perf_counter(), time.process_time()
-    source = EventSource(data_source(hamlet_sentences, 100000)).with_producer_fn(TestDataConnection.get_data)
+    source = EventSource(data_source(hamlet_sentences, 1_000_000)).with_producer_fn(TestDataConnection.get_data)
     splitter = Splitter(expansion_factor=20).with_split_fn(split_fn)
-    sink = EventSink().with_consumer_fn(debug_sink)
+    sink = EventSink(new_counting_sink()).with_consumer_fn(CountingSink.sink)
     source.send_to(splitter).send_to(sink)
 
     flow_engine = FlowEngine()
@@ -112,7 +115,7 @@ async def main():
     await flow_engine.run()
     t2 = time.perf_counter(), time.process_time()
     elapsed = t2[0] - t1[0], t2[1] - t1[1]
-    print(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}')
+    print(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
 
 logging.basicConfig(level=logging.DEBUG)
 asyncio.run(main())
