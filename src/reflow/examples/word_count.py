@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import time
 from typing import List, TypeVar, Generic
 
 from reflow import flow_connector_factory, EventSource, EventSink, Splitter
@@ -100,6 +101,7 @@ def split_fn(sentence):
     return sentence.split()
 
 async def main():
+    t1 = time.perf_counter(), time.process_time()
     source = EventSource(data_source(hamlet_sentences, 100000)).with_producer_fn(TestDataConnection.get_data)
     splitter = Splitter(expansion_factor=20).with_split_fn(split_fn)
     sink = EventSink().with_consumer_fn(debug_sink)
@@ -108,7 +110,9 @@ async def main():
     flow_engine = FlowEngine()
     await flow_engine.deploy(source, exit_on_completion=True)
     await flow_engine.run()
-
+    t2 = time.perf_counter(), time.process_time()
+    elapsed = t2[0] - t1[0], t2[1] - t1[1]
+    print(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}')
 
 logging.basicConfig(level=logging.DEBUG)
 asyncio.run(main())
