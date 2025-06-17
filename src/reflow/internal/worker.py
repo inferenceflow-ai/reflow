@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from abc import ABC, abstractmethod
 from typing import Generic, List
@@ -8,7 +9,7 @@ from reflow.internal.event_queue import OutputQueue, InputQueue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
-from reflow.typedefs import EndOfStreamException
+from typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10000
@@ -41,6 +42,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
     async def init(self):
         if self.init_fn and not self.state:
+            # noinspection PyTypeChecker
             self.state = await asyncio.get_running_loop().run_in_executor(None, self.init_fn)
 
     async def input_batch_size(self)->int:
@@ -56,28 +58,43 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         return await self.input_queue.get_events(self.id, batch_size)
 
     async def process(self)->None:
-        if len(self.in_out_buffer.unsent_out_events) == 0:
-            events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
-            ready_events = await self.input_queue.get_events(self.id, events_to_read)
+        while True:
+            if len(self.in_out_buffer.unsent_out_events) == 0 and not self.finished:
+                events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
+                ready_events = await self.input_queue.get_events(self.id, events_to_read)
+                logging.debug(f'{self} read {len(ready_events)} from input queue')
 
-            # Regular events get passed through to the transform function but processing instructions
-            # get processed at this level.
+                # Regular events get passed through to the transform function but processing instructions
+                # get processed at this level.
 
-            for envelope in ready_events:
-                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                    output = self.handle_event(envelope)
-                    self.in_out_buffer.record_split_event(output)
-                elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                    self.finished = True
-                    self.in_out_buffer.record_1_1(envelope)
+                for envelope in ready_events:
+                    if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                        output = self.handle_event(envelope)
+                        self.in_out_buffer.record_split_event(output)
+                    elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                        self.finished = True
+                        self.in_out_buffer.record_1_1(envelope)
+                    else:
+                        raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+
+            if len(self.in_out_buffer.unsent_out_events) > 0:
+                logging.debug(f'{self} attempting to deliver  { len(self.in_out_buffer.unsent_out_events)}  output events')
+                consumed_events = await self.output_queue.enqueue(self.in_out_buffer.unsent_out_events)
+                logging.debug(f'{self} delivered  {consumed_events}  output events')
+                if consumed_events > 0:
+                    input_events_to_acknowledge = self.in_out_buffer.record_delivered_out_events(consumed_events)
+                    await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
+                    logging.debug(f'{self} acknowledged {input_events_to_acknowledge} input events')
+            else:
+                # avoid busy loop
+                if not self.finished:
+                    logging.debug(f'Nothing to do: {self} sleeping for 1s')
+                    await asyncio.sleep(1)
                 else:
-                    raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+                    logging.debug(f'{self} exiting due to end of stream')
+                    break
 
-        if len(self.in_out_buffer.unsent_out_events) > 0:
-            consumed_events = await self.output_queue.enqueue(self.in_out_buffer.unsent_out_events)
-            if consumed_events > 0:
-                input_events_to_acknowledge = self.in_out_buffer.record_delivered_out_events(consumed_events)
-                await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
+            await asyncio.sleep(0)
 
     @abstractmethod
     def handle_event(self, event: Envelope[IN_EVENT_TYPE])->List[Envelope[EVENT_TYPE]]:
@@ -139,7 +156,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
                 result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, limit)
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
-        except EndOfStreamException:
+        except EndOfStreamException as _:
             return [Envelope(INSTRUCTION.END_OF_STREAM)]
 
     # this class does not support "acknowledge" functionality

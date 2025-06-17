@@ -1,10 +1,17 @@
-import argparse
 import asyncio
+from dataclasses import dataclass
 from typing import List, Any
 
-from reflow import FlowStage, Worker, InputQueue, EventSink, LocalEventQueue
+from reflow import FlowStage, Worker, EventSink
+from reflow.internal.event_queue import InputQueue, LocalEventQueue
 
 DEFAULT_QUEUE_SIZE = 10000
+
+@dataclass
+class DeployJobRequest:
+    flow: FlowStage
+    exit_on_completion: bool
+
 
 # what is the network naming scheme for flow engines ?
 #
@@ -14,40 +21,31 @@ DEFAULT_QUEUE_SIZE = 10000
 # Lets use 5nnn as the port number
 
 class FlowEngine:
-    def __init__(self, queue_size:int = DEFAULT_QUEUE_SIZE):
+    def __init__(self, queue_size: int = DEFAULT_QUEUE_SIZE):
         self.queue_size = queue_size
         self.running = True
-        self.workers = []
-        self.exit_on_completion = False
+        self.worker_tasks = []
+        self.shutting_down = False
 
-    async def run(self):
-        while True:
-            if len(self.workers) > 0:
-                for worker in self.workers.copy():
-                    # iterate over a copy to avoid problems related to removing while iterating
-                    # it is a shallow copy - we remove from self.workers but iterate over a
-                    # copy
-                    if not worker.finished or len(worker.in_out_buffer.unsent_out_events) > 0:
-                        await worker.process()
-                    else:
-                        self.workers.remove(worker)
-                        if len(self.workers) == 0 and self.exit_on_completion:
-                            return # RETURN
-            else:
-                # to avoid a busy idle loop
-                await asyncio.sleep(1)
+    # async def process_request(self, request: DeployJobRequest) -> Any:
+    #     await self.deploy(request.flow, request.exit_on_completion)
 
     # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
-    async def deploy(self, flow_stage: FlowStage, exit_on_completion = False):
+    async def deploy(self, flow_stage: FlowStage):
+        if self.shutting_down:
+            raise RuntimeError('The job cannot be deployed because the engine is shutting down')
+
         builder = JobBuilder(self.queue_size)
         workers = []
         builder.build_job(flow_stage, workers)
-        for worker in workers:
-            await worker.init()
+        await asyncio.gather(*[worker.init() for worker in workers])
+        tasks = [asyncio.create_task(worker.process()) for worker in workers]  # tasks start running here
+        self.worker_tasks.extend(tasks)
 
-        self.workers.extend(workers)
-        self.exit_on_completion = exit_on_completion
 
+    async def shutdown_when_done(self):
+        self.shutting_down = True
+        await asyncio.gather(*self.worker_tasks)
 
 
 class JobBuilder:
@@ -68,8 +66,13 @@ class JobBuilder:
             for downstream_stage in stage.downstream_stages:
                 self.build_job(downstream_stage, worker_list, output_queue)
 
-if __name__ == '__main__':
-    arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
-    arg_parser.add_argument("port", required=True, type=int, help="The port number to listen on for deployments")
-    args = arg_parser.parse_args()
-    port = args.port
+# if __name__ == '__main__':
+#     arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
+#     arg_parser.add_argument("port", required=True, type=int, help="The port number to listen on for deployments")
+#     args = arg_parser.parse_args()
+#     port = args.port
+#
+#     bind_address_list = [f'ipc://{port:04d}', f'tcp://*:{port}']
+#     with FlowEngine(bind_address_list) as engine:
+#         pass
+    
