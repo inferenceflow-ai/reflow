@@ -88,8 +88,9 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             else:
                 # avoid busy loop
                 if not self.finished:
-                    logging.debug(f'Nothing to do: {self} sleeping for 1s')
-                    await asyncio.sleep(1)
+                    pass
+                    # logging.debug(f'Nothing to do: {self} sleeping for .01s')
+                    # await asyncio.sleep(.01)
                 else:
                     logging.debug(f'{self} exiting due to end of stream')
                     break
