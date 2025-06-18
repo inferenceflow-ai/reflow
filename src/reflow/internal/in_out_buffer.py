@@ -8,13 +8,13 @@ class InOutBuffer:
         self.event_mappings = []
         self.unsent_out_events = []
         self.processed_in_events = 0
-        self.delivered_out_events = 0
+        self.produced_out_events = 0
 
     def clear(self):
         self.event_mappings = []
         self.unsent_out_events = []
         self.processed_in_events = 0
-        self.delivered_out_events = 0
+        self.produced_out_events = 0
 
     def record_1_1(self, envelope: Envelope[Any]):
         self.unsent_out_events.append(envelope)
@@ -44,8 +44,8 @@ class InOutBuffer:
 
     def _record_in_out(self, in_event_count: int, out_event_count: int)->None:
         self.processed_in_events +=  in_event_count
-        self.delivered_out_events += out_event_count
-        self.event_mappings.append((self.processed_in_events, self.delivered_out_events))
+        self.produced_out_events += out_event_count
+        self.event_mappings.append((self.processed_in_events, self.produced_out_events))
 
     def record_delivered_out_events(self, delivered_out_events: int, trim=True)->int:
         found = False
@@ -62,9 +62,9 @@ class InOutBuffer:
         # i now points to the entry corresponding to the highest input event that can be acknowledged
         # in_count and out_count point to the contents of that entry
         if trim:
-            del self.unsent_out_events[0:delivered_out_events]
+            del self.unsent_out_events[0:out_count]
             del self.event_mappings[0:i+1]
-            self.delivered_out_events -= out_count
+            self.produced_out_events -= out_count
             self.processed_in_events -= in_count
             for n in range(len(self.event_mappings)):
                 ii, oo = self.event_mappings[n]
