@@ -12,7 +12,7 @@ from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, Init
 from reflow.typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
-MAX_BATCH_SIZE = 10000
+MAX_BATCH_SIZE = 10_000
 
 
 # The back-pressure algorithm
@@ -62,7 +62,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             if len(self.in_out_buffer.unsent_out_events) == 0 and not self.finished:
                 events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
                 ready_events = await self.input_queue.get_events(self.id, events_to_read)
-                logging.debug(f'{self} read {len(ready_events)} from input queue')
+                logging.debug(f'{self} attempted to read up to {events_to_read} events from input queue and received  {len(ready_events)}.')
 
                 # Regular events get passed through to the transform function but processing instructions
                 # get processed at this level.
