@@ -1,15 +1,14 @@
 import asyncio
+import logging
 from typing import List, TypeVar, Generic
 
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.local_flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
-# a source emits events consisting of the numbers 1-100 in order.
-# a sink prints out what it receives.
-
 
 T = TypeVar("T")
+
 
 class ListSource(Generic[T]):
     def __init__(self, data: List[T]):

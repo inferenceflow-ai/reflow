@@ -11,7 +11,7 @@ from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, Init
 from reflow.typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
-MAX_BATCH_SIZE = 10000
+MAX_BATCH_SIZE = 10_000
 
 
 # The back-pressure algorithm
