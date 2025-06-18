@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from abc import ABC, abstractmethod
 from typing import Generic, List
@@ -41,6 +42,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
     async def init(self):
         if self.init_fn and not self.state:
+            # noinspection PyTypeChecker
             self.state = await asyncio.get_running_loop().run_in_executor(None, self.init_fn)
 
     async def input_batch_size(self)->int:
@@ -56,28 +58,34 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         return await self.input_queue.get_events(self.id, batch_size)
 
     async def process(self)->None:
-        if len(self.in_out_buffer.unsent_out_events) == 0:
+        if len(self.in_out_buffer.unsent_out_events) == 0 and not self.finished:
             events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
-            ready_events = await self.input_queue.get_events(self.id, events_to_read)
+            if events_to_read > 0:
+                ready_events = await self.input_queue.get_events(self.id, events_to_read)
+                logging.debug(f'{self} attempted to read up to {events_to_read} events from input queue and received  {len(ready_events)}.')
 
-            # Regular events get passed through to the transform function but processing instructions
-            # get processed at this level.
-
-            for envelope in ready_events:
-                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                    output = self.handle_event(envelope)
-                    self.in_out_buffer.record_split_event(output)
-                elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                    self.finished = True
-                    self.in_out_buffer.record_1_1(envelope)
-                else:
-                    raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+                for envelope in ready_events:
+                    if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                        output = self.handle_event(envelope)
+                        self.in_out_buffer.record_split_event(output)
+                    elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                        self.finished = True
+                        self.in_out_buffer.record_1_1(envelope)
+                    else:
+                        raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+            else:
+                logging.debug(f"{self} not reading input events while output queue is full")
 
         if len(self.in_out_buffer.unsent_out_events) > 0:
+            logging.debug(f'{self} attempting to deliver  { len(self.in_out_buffer.unsent_out_events)}  output events')
             consumed_events = await self.output_queue.enqueue(self.in_out_buffer.unsent_out_events)
+            logging.debug(f'{self} delivered  {consumed_events}  output events')
             if consumed_events > 0:
                 input_events_to_acknowledge = self.in_out_buffer.record_delivered_out_events(consumed_events)
                 await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
+                logging.debug(f'{self} acknowledged {input_events_to_acknowledge} input events')
+
+
 
     @abstractmethod
     def handle_event(self, event: Envelope[IN_EVENT_TYPE])->List[Envelope[EVENT_TYPE]]:
@@ -132,6 +140,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
         self.state = state
 
     async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
+        assert limit > 0
         try:
             if self.state:
                 result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, self.state, limit)

@@ -120,7 +120,7 @@ async def main():
     print(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
 
 
-logging.basicConfig(level=logging.DEBUG, filename="wordcount.log")
+# logging.basicConfig(level=logging.DEBUG, filename="wordcount.log")
 asyncio.run(main())
 
 
