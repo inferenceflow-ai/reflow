@@ -1,6 +1,6 @@
 from typing import List
 
-from internal.zmq_client import ZMQClient
+from reflow.internal.zmq_client import ZMQClient
 from reflow.internal import Envelope
 from reflow.internal.event_queue import EVENT_TYPE, InputQueue, OutputQueue, EnqueueRequest, \
     RemainingCapacityRequest, GetEventsRequest, AcknowledgeEventsRequest
