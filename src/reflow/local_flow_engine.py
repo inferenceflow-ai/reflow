@@ -1,7 +1,10 @@
 import argparse
 import asyncio
+import logging
+from dataclasses import dataclass
 from typing import List, Any
 
+from internal.zmq_server import ZMQServer
 from reflow import FlowStage, Worker, EventSink
 from reflow.internal.event_queue import InputQueue, LocalEventQueue
 
@@ -14,12 +17,24 @@ DEFAULT_QUEUE_SIZE = 10000
 # and from remote hosts as tcp://host:nnnn where
 # Lets use 5nnn as the port number
 
-class FlowEngine:
-    def __init__(self, queue_size:int = DEFAULT_QUEUE_SIZE):
-        self.queue_size = queue_size
+@dataclass
+class DeployRequest:
+    flow: FlowStage
+    exit_on_completion: bool
+
+class FlowEngine(ZMQServer):
+    def __init__(self, default_queue_size:int, bind_addresses: List[str]):
+        ZMQServer.__init__(self, bind_addresses)
+        self.default_queue_size = default_queue_size
         self.running = True
         self.workers = []
         self.exit_on_completion = False
+
+    async def process_request(self, request: Any) -> Any:
+        if not isinstance(request, DeployRequest):
+            raise RuntimeError(f'Request must be an instance of DeployRequest.  Received {type(request)}')
+
+        await self.deploy(request.flow, request.exit_on_completion)
 
     async def run(self):
         while True:
@@ -40,7 +55,7 @@ class FlowEngine:
 
     # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
     async def deploy(self, flow_stage: FlowStage, exit_on_completion = False):
-        builder = JobBuilder(self.queue_size)
+        builder = JobBuilder(self.default_queue_size)
         workers = []
         builder.build_job(flow_stage, workers)
         for worker in workers:
@@ -69,8 +84,20 @@ class JobBuilder:
             for downstream_stage in stage.downstream_stages:
                 self.build_job(downstream_stage, worker_list, output_queue)
 
+
+async def main(port: int):
+    zmq_bind_addresses = [f'ipc://flow_engine_{port:04d}', f'tcp://*:{port}']
+    with FlowEngine(DEFAULT_QUEUE_SIZE, zmq_bind_addresses) as flow_engine:
+        task = asyncio.create_task(flow_engine.run())
+        await task
+
+
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
-    arg_parser.add_argument("port", required=True, type=int, help="The port number to listen on for deployments")
+    arg_parser.add_argument("port", type=int, help="The port number to listen on for deployments")
     args = arg_parser.parse_args()
-    port = args.port
+
+    asyncio.run(main(args.port))
+
+

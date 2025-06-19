@@ -95,6 +95,22 @@ files = [
 ]
 
 [[package]]
+name = "dill"
+version = "0.4.0"
+description = "serialize all of Python"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "dill-0.4.0-py3-none-any.whl", hash = "sha256:44f54bf6412c2c8464c14e8243eb163690a9800dbe2c367330883b19c7561049"},
+    {file = "dill-0.4.0.tar.gz", hash = "sha256:0633f1d2df477324f53a895b02c901fb961bdbf65a17122586ea7019292cbcf0"},
+]
+
+[package.extras]
+graph = ["objgraph (>=1.7.2)"]
+profile = ["gprof2dot (>=2022.7.29)"]
+
+[[package]]
 name = "iniconfig"
 version = "2.1.0"
 description = "brain-dead simple config-ini parsing"
@@ -296,4 +312,4 @@ cffi = {version = "*", markers = "implementation_name == \"pypy\""}
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "1aa5a73ba90a7afe2d7f67f8edc0eb7536106ed6e43972c848cae401ecb24fd6"
+content-hash = "797f18e023d7f2b50d3f562a62ee2878f0593a64be819b1e6e44e6d697636d7d"

@@ -1,3 +1,6 @@
+from typing import Any
+
+import dill
 import zmq
 from zmq.asyncio import Context
 
@@ -18,3 +21,10 @@ class ZMQClient:
         self.socket.close()
         self.context.term()
         return False
+
+    async def send_request(self, request: Any) -> Any:
+        request_bytes = dill.dumps(request)
+        await self.socket.send(request_bytes)
+        response_bytes = await self.socket.recv()
+        response = dill.loads(response_bytes)
+        return response
