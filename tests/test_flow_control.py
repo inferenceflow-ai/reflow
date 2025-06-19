@@ -58,7 +58,7 @@ async def main():
     event_sink = EventSink(sink(consumed_event_list)).with_consumer_fn(ListSink.slow_sink)
     event_source.send_to(event_sink)
 
-    flow_engine = FlowEngine(queue_size=32)
+    flow_engine = FlowEngine(default_queue_size=32, bind_addresses=['ipc://5555'])
     await flow_engine.deploy(event_source, exit_on_completion=True)
     await flow_engine.run()
 

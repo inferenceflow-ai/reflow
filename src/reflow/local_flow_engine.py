@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Any
 
-from internal.zmq_server import ZMQServer
+from reflow.internal.zmq_server import ZMQServer
 from reflow import FlowStage, Worker, EventSink
 from reflow.internal.event_queue import InputQueue, LocalEventQueue
 
