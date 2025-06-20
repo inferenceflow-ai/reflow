@@ -55,6 +55,7 @@ class TestDataConnection(Generic[T]):
         self.count = 0
         self.stop_after = stop_after
 
+    # noinspection PyTypeChecker
     def get_data(self, max_items: int)->List[T]:
         assert max_items > 0
         if self.stop_after > 0:
@@ -80,26 +81,15 @@ def debug_sink(events: List[str])-> int:
 
 word_count = 0
 
-class CountingSink:
-    def __init__(self):
-        pass
-
-    def sink(self, events: List[str])->int:
-        global word_count
-        result = len(events)
-        word_count += result
-        return result
-
-
-@flow_connector_factory
-def new_counting_sink():
-    return CountingSink()
-
+def counting_sink(events: List[str])->int:
+    global word_count
+    result = len(events)
+    word_count += result
+    return result
 
 # noinspection PyUnusedLocal
 def null_sink(events: List[str])-> None:
     pass
-
 
 def split_fn(sentence):
     return sentence.split()
@@ -108,19 +98,20 @@ async def main():
     t1 = time.perf_counter(), time.process_time()
     source = EventSource(data_source(hamlet_sentences, 100_000)).with_producer_fn(TestDataConnection.get_data)
     splitter = Splitter(expansion_factor=40).with_split_fn(split_fn)
-    sink = EventSink(new_counting_sink()).with_consumer_fn(CountingSink.sink)
+    sink = EventSink().with_consumer_fn(counting_sink)
     source.send_to(splitter).send_to(sink)
 
-    flow_engine = FlowEngine()
-    await flow_engine.deploy(source, exit_on_completion=True)
-    await flow_engine.run()
-    t2 = time.perf_counter(), time.process_time()
-    elapsed = t2[0] - t1[0], t2[1] - t1[1]
-    logging.info(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
-    print(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
+    with FlowEngine(10_000, bind_addresses=['ipc://5555']) as flow_engine:
+        await flow_engine.deploy(source)
+        task = asyncio.create_task(flow_engine.run())
+        await flow_engine.request_shutdown()
+        await task
+        t2 = time.perf_counter(), time.process_time()
+        elapsed = t2[0] - t1[0], t2[1] - t1[1]
+        logging.info(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
 
 
-# logging.basicConfig(level=logging.DEBUG, filename="wordcount.log")
+logging.basicConfig(level=logging.INFO)
 asyncio.run(main())
 
 

@@ -13,7 +13,9 @@ test_data = ["alpha", "beta", "gamma"]
 def iterator_source(data: List[str])->Iterator[str]:
     return iter(data)
 
-def iterator_producer(it: Iterator[str], limit: int)->str:
+
+# noinspection PyUnusedLocal
+def iterator_producer(it: Iterator[str], limit: int)->List[str]:
     try:
         return [next(it)]
     except StopIteration:
@@ -33,10 +35,13 @@ source.send_to(sink)
 async def main():
     with FlowEngine(100, ['ipc://5001']) as engine:
         with ZMQClient('ipc://5001') as client:
-            request = DeployRequest(source, True)
+            request = DeployRequest(source)
             await client.send_request(request)
             logging.info('Deployed flow')
-            await engine.run()
+
+        task = asyncio.create_task(engine.run())
+        await engine.request_shutdown()
+        await task
 
 
 logging.basicConfig(level=logging.INFO)

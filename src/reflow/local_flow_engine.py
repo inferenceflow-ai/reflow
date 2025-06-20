@@ -17,10 +17,26 @@ DEFAULT_QUEUE_SIZE = 10000
 # and from remote hosts as tcp://host:nnnn where
 # Lets use 5nnn as the port number
 
+
 @dataclass
 class DeployRequest:
     flow: FlowStage
-    exit_on_completion: bool
+
+
+@dataclass
+class DeployResponse:
+    pass
+
+
+@dataclass
+class ShutdownRequest:
+    pass
+
+
+@dataclass
+class ShutdownResponse:
+    pass
+
 
 class FlowEngine(ZMQServer):
     def __init__(self, default_queue_size:int, bind_addresses: List[str]):
@@ -28,13 +44,17 @@ class FlowEngine(ZMQServer):
         self.default_queue_size = default_queue_size
         self.running = True
         self.workers = []
-        self.exit_on_completion = False
+        self.shutdown_requested = False
 
     async def process_request(self, request: Any) -> Any:
-        if not isinstance(request, DeployRequest):
-            raise RuntimeError(f'Request must be an instance of DeployRequest.  Received {type(request)}')
-
-        await self.deploy(request.flow, request.exit_on_completion)
+        if isinstance(request, DeployRequest):
+            await self.deploy(request.flow)
+            return DeployResponse()
+        elif isinstance(request, ShutdownRequest):
+            success = await self.request_shutdown()
+            return ShutdownResponse()
+        else:
+            raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
     async def run(self):
         while True:
@@ -47,14 +67,17 @@ class FlowEngine(ZMQServer):
                         await worker.process()
                     else:
                         self.workers.remove(worker)
-                        if len(self.workers) == 0 and self.exit_on_completion:
-                            return # RETURN
+            elif self.shutdown_requested:
+                break
             else:
                 # to avoid a busy idle loop
                 await asyncio.sleep(1)
 
     # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
-    async def deploy(self, flow_stage: FlowStage, exit_on_completion = False):
+    async def deploy(self, flow_stage: FlowStage):
+        if self.shutdown_requested:
+            raise RuntimeError('Cannot deploy job because engine is shutting down.')
+
         builder = JobBuilder(self.default_queue_size)
         workers = []
         builder.build_job(flow_stage, workers)
@@ -62,7 +85,15 @@ class FlowEngine(ZMQServer):
             await worker.init()
 
         self.workers.extend(workers)
-        self.exit_on_completion = exit_on_completion
+
+    async def request_shutdown(self):
+        """
+        Requests shutdown.  This will inhibit attempts to deploy an new jobs.  This method does not wait for
+        the engine to exit and the engine will only exit after there are no more active workers, if ever.
+
+        To wait for the engine to exit, request shutdown, then await the task that is running the FlowEngine.run method.
+        """
+        self.shutdown_requested = True
 
 
 
