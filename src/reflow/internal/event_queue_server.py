@@ -4,7 +4,7 @@ from typing import Generic, List, Any
 import zmq
 from zmq.asyncio import Context
 
-from reflow.internal.zmq_server import ZMQServer
+from reflow.internal.zmq import ZMQServer
 from reflow.internal.event_queue import EnqueueRequest, RemainingCapacityRequest, GetEventsRequest, \
     AcknowledgeEventsRequest, \
     EnqueueResponse, RemainingCapacityResponse, GetEventsResponse, AcknowledgeEventsResponse, EVENT_TYPE, \

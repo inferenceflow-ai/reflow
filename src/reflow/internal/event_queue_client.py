@@ -1,14 +1,14 @@
 from typing import List
 
-from reflow.internal.zmq_client import ZMQClient
+from reflow.internal.zmq import ZMQClient
 from reflow.internal import Envelope
 from reflow.internal.event_queue import EVENT_TYPE, InputQueue, OutputQueue, EnqueueRequest, \
     RemainingCapacityRequest, GetEventsRequest, AcknowledgeEventsRequest
 
 
 class EventQueueClient(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQClient):
-    def __init__(self, bind_address: str):
-        ZMQClient.__init__(self, bind_address)
+    def __init__(self, server_address: str):
+        ZMQClient.__init__(self, server_address)
 
     async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
         request = EnqueueRequest(events = events)

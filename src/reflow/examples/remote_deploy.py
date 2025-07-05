@@ -2,9 +2,9 @@ import asyncio
 import logging
 from typing import Iterator, List
 
-from local_flow_engine import FlowEngine, DeployRequest
+from local_flow_engine import FlowEngine, DeployRequest, FlowEngineClient
 from reflow import flow_connector_factory, EventSource, EventSink
-from reflow.internal.zmq_client import ZMQClient
+from internal.zmq import ZMQClient
 from reflow.typedefs import EndOfStreamException
 
 test_data = ["alpha", "beta", "gamma"]
@@ -34,9 +34,8 @@ source.send_to(sink)
 
 async def main():
     with FlowEngine(100, ['ipc://5001']) as engine:
-        with ZMQClient('ipc://5001') as client:
-            request = DeployRequest(source)
-            await client.send_request(request)
+        with FlowEngineClient('ipc://5001') as client:
+            await client.deploy(source)
             logging.info('Deployed flow')
 
         task = asyncio.create_task(engine.run())

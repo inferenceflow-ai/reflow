@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Any
 
-from reflow.internal.zmq_server import ZMQServer
+from reflow.internal.zmq import ZMQServer, ZMQClient
 from reflow import FlowStage, Worker, EventSink
 from reflow.internal.event_queue import InputQueue, LocalEventQueue
 
@@ -95,6 +95,18 @@ class FlowEngine(ZMQServer):
         """
         self.shutdown_requested = True
 
+
+class FlowEngineClient(ZMQClient):
+    def __init__(self, server_address: str):
+        ZMQClient.__init__(self, server_address)
+
+    async def deploy(self, flow_stage: FlowStage):
+        deploy_request = DeployRequest(flow_stage)
+        await self.send_request(deploy_request)
+
+    async def request_shutdown(self):
+        request = ShutdownRequest()
+        await self.send_request()
 
 
 class JobBuilder:
