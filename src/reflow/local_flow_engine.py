@@ -6,7 +6,7 @@ from typing import List, Any
 
 from reflow.internal.zmq import ZMQServer, ZMQClient
 from reflow import FlowStage, Worker, EventSink
-from reflow.internal.event_queue import InputQueue, LocalEventQueue
+from reflow.internal.event_queue import InputQueue, DequeueEventQueue
 
 DEFAULT_QUEUE_SIZE = 10000
 
@@ -122,7 +122,7 @@ class JobBuilder:
             worker.input_queue = input_queue
 
         if not isinstance(stage, EventSink):
-            output_queue = LocalEventQueue(self.queue_size)
+            output_queue = DequeueEventQueue(self.queue_size)
             worker.output_queue = output_queue
             for downstream_stage in stage.downstream_stages:
                 self.build_job(downstream_stage, worker_list, output_queue)

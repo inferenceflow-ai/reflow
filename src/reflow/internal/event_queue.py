@@ -1,7 +1,8 @@
 from collections import deque, defaultdict
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, List, Generic
+from typing import Protocol, TypeVar, List, Generic, Any
 
+from reflow.internal.zmq import ZMQServer, ZMQClient
 from reflow.internal import Envelope
 
 EVENT_TYPE = TypeVar('EVENT_TYPE')
@@ -53,8 +54,9 @@ class OutputQueue(Protocol[EVENT_TYPE]):
         ...
 
 
-class LocalEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE]):
-    def __init__(self, capacity: int):
+class DequeueEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQServer):
+    def __init__(self, capacity: int, bind_addresses: List[str] = None):
+        ZMQServer.__init__(self, bind_addresses)
         self.events = deque(maxlen=capacity)
         self.next_event = defaultdict(lambda: -1)
 
@@ -92,6 +94,24 @@ class LocalEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE]):
         if num_to_pop > 0:
             for k,v in self.next_event.items():
                 self.next_event[k] = v + num_to_pop
+
+    async def process_request(self, request: Any):
+        if isinstance(request, EnqueueRequest):
+            count = await self.enqueue(request.events)
+            response = EnqueueResponse(count=count)
+        elif isinstance(request, RemainingCapacityRequest):
+            count = await self.remaining_capacity()
+            response = RemainingCapacityResponse(count = count)
+        elif isinstance(request, GetEventsRequest):
+            events = await self.get_events(request.subscriber, request.limit)
+            response = GetEventsResponse(events = events)
+        elif isinstance(request, AcknowledgeEventsRequest):
+            await self.acknowledge_events(request.subscriber, request.count)
+            response = AcknowledgeEventsResponse()
+        else:
+            raise RuntimeError("received unknown request")
+
+        return response
 
 
 @dataclass
@@ -135,3 +155,30 @@ class AcknowledgeEventsRequest:
 class AcknowledgeEventsResponse:
     pass
 
+
+class EventQueueClient(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQClient):
+    def __init__(self, server_address: str):
+        ZMQClient.__init__(self, server_address)
+
+    async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
+        request = EnqueueRequest(events = events)
+        await self.socket.send_pyobj(request)
+        response = await self.socket.recv_pyobj()
+        return response.count
+
+    async def remaining_capacity(self)->int:
+        request = RemainingCapacityRequest()
+        await self.socket.send_pyobj(request)
+        response = await self.socket.recv_pyobj()
+        return response.count
+
+    async def get_events(self, subscriber: str, limit: int = 0)->List[Envelope[EVENT_TYPE]]:
+        request = GetEventsRequest(subscriber=subscriber, limit=limit)
+        await self.socket.send_pyobj(request)
+        response = await self.socket.recv_pyobj()
+        return response.events
+
+    async def acknowledge_events(self, subscriber: str, n: int)->None:
+        request = AcknowledgeEventsRequest(subscriber=subscriber, count = n)
+        await self.socket.send_pyobj(request)
+        await self.socket.recv_pyobj()

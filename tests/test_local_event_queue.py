@@ -1,12 +1,12 @@
 import pytest
 
 from reflow.internal import wrap, unwrap
-from reflow.internal.event_queue import LocalEventQueue
+from reflow.internal.event_queue import DequeueEventQueue
 
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    q = LocalEventQueue(6)
+    q = DequeueEventQueue(6)
     await q.enqueue(wrap(["a","b","c"]))
 
     result = await q.get_events("frodo", 2)

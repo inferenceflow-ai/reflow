@@ -1,13 +1,12 @@
 import pytest
 
 from reflow.internal import wrap, unwrap
-from reflow.internal.event_queue_client import EventQueueClient
-from reflow.internal.event_queue_server import EventQueueServer
+from reflow.internal.event_queue import EventQueueClient, DequeueEventQueue
 
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    with EventQueueServer(6, ["ipc://basic_test"]):
+    with DequeueEventQueue(6, ["ipc://basic_test"]):
         with EventQueueClient("ipc://basic_test") as client:
             await client.enqueue(wrap(["a","b","c"]))
 
