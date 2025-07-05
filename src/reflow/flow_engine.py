@@ -57,6 +57,7 @@ class FlowEngine(ZMQServer):
             raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
     async def run(self):
+        logging.info("FlowEngine started")
         while True:
             if len(self.workers) > 0:
                 for worker in self.workers.copy():
@@ -72,6 +73,8 @@ class FlowEngine(ZMQServer):
             else:
                 # to avoid a busy idle loop
                 await asyncio.sleep(1)
+
+        logging.info("FlowEngine stopped")
 
     # noinspection PyUnboundLocalVariable,PyMethodMayBeStatic
     async def deploy(self, flow_stage: FlowStage):

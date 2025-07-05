@@ -5,7 +5,7 @@ import time
 from typing import List, TypeVar, Generic
 
 from reflow import flow_connector_factory, EventSource, EventSink, Splitter
-from reflow.local_flow_engine import FlowEngine
+from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
 hamlet_sentences =  [

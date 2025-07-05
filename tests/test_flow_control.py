@@ -3,7 +3,7 @@ import logging
 from typing import List, TypeVar, Generic
 
 from reflow import flow_connector_factory, EventSource, EventSink
-from reflow.local_flow_engine import FlowEngine
+from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
 
