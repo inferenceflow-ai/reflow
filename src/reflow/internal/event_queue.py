@@ -1,9 +1,11 @@
+import dill
+
 from collections import deque, defaultdict
 from dataclasses import dataclass
 from typing import Protocol, TypeVar, List, Generic, Any
 
-from reflow.internal.zmq import ZMQServer, ZMQClient
 from reflow.internal import Envelope
+from reflow.internal.zmq import ZMQServer, ZMQClient
 
 EVENT_TYPE = TypeVar('EVENT_TYPE')
 
@@ -55,8 +57,8 @@ class OutputQueue(Protocol[EVENT_TYPE]):
 
 
 class DequeueEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQServer):
-    def __init__(self, capacity: int, bind_addresses: List[str] = None):
-        ZMQServer.__init__(self, bind_addresses)
+    def __init__(self, capacity: int, *, bind_addresses: List[str] = None, preferred_network = None):
+        ZMQServer.__init__(self, bind_addresses=bind_addresses, preferred_network=preferred_network)
         self.events = deque(maxlen=capacity)
         self.next_event = defaultdict(lambda: -1)
 
@@ -162,23 +164,35 @@ class EventQueueClient(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQClien
 
     async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
         request = EnqueueRequest(events = events)
-        await self.socket.send_pyobj(request)
-        response = await self.socket.recv_pyobj()
+        request_bytes = dill.dumps(request)
+        await self.socket.send(request_bytes)
+        response_bytes = await self.socket.recv()
+        response = dill.loads(response_bytes)
         return response.count
 
     async def remaining_capacity(self)->int:
         request = RemainingCapacityRequest()
-        await self.socket.send_pyobj(request)
-        response = await self.socket.recv_pyobj()
+        request_bytes = dill.dumps(request)
+        await self.socket.send(request_bytes)
+        response_bytes = await self.socket.recv()
+        response = dill.loads(response_bytes)
         return response.count
 
     async def get_events(self, subscriber: str, limit: int = 0)->List[Envelope[EVENT_TYPE]]:
         request = GetEventsRequest(subscriber=subscriber, limit=limit)
-        await self.socket.send_pyobj(request)
-        response = await self.socket.recv_pyobj()
+        request_bytes = dill.dumps(request)
+        await self.socket.send(request_bytes)
+        response_bytes = await self.socket.recv()
+        response = dill.loads(response_bytes)
         return response.events
 
     async def acknowledge_events(self, subscriber: str, n: int)->None:
         request = AcknowledgeEventsRequest(subscriber=subscriber, count = n)
-        await self.socket.send_pyobj(request)
-        await self.socket.recv_pyobj()
+        request_bytes = dill.dumps(request)
+        await self.socket.send(request_bytes)
+        response_bytes = await self.socket.recv()
+        response = dill.loads(response_bytes)
+        return None
+
+
+local_event_queue_registry = {}

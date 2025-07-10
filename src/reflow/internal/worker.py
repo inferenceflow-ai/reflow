@@ -2,14 +2,17 @@ import asyncio
 import logging
 import uuid
 from abc import ABC, abstractmethod
+from contextlib import ExitStack
 from typing import Generic, List
 
 from reflow.internal import Envelope, INSTRUCTION
-from reflow.internal.event_queue import OutputQueue, InputQueue
+from reflow.internal.edge_router import LoadBalancingEdgeRouter
+from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue
 from reflow.internal.in_out_buffer import InOutBuffer
+from reflow.internal.network import Address
+from reflow.typedefs import EndOfStreamException
 from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
-from reflow.typedefs import EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10_000
@@ -29,16 +32,39 @@ MAX_BATCH_SIZE = 10_000
 #  - after this, some events may remain in the output event list
 #
 
+
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, init_fn: InitFn = None, expansion_factor = 1):
+    def __init__(self, *, preferred_network: str, init_fn: InitFn = None, expansion_factor = 1, input_queue_size: int = None, outboxes: List[List[Address]] = None):
         self.init_fn = init_fn
         self.state = None
         self.input_queue = None
-        self.output_queue = None
         self.expansion_factor = expansion_factor
-        self.id = uuid.uuid4()
+        self.id = str(uuid.uuid4())
         self.finished = False
-        self.in_out_buffer = InOutBuffer()
+        self.preferred_network = preferred_network
+        self.output_queues = None
+        self.in_out_buffers = None
+        self.exit_stack = ExitStack()
+
+        if not isinstance(self, SourceWorker):
+            self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)
+            self.exit_stack.enter_context(self.input_queue)
+
+        if outboxes:
+            self.output_queues = [ LoadBalancingEdgeRouter(outbox_addr_list, preferred_network) for outbox_addr_list in outboxes ]
+            self.in_out_buffers = [ InOutBuffer() for _ in outboxes]
+            for outbox in self.output_queues:
+                self.exit_stack.enter_context(outbox)
+
+        else:
+            self.output_queues = []
+            self.in_out_buffers = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     async def init(self):
         if self.init_fn and not self.state:
@@ -50,50 +76,65 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         Based on the capacity available in the output queue and other factors, computes a recommended number of
         events to read from the input queue and process
         """
-        downstream_capacity = await self.output_queue.remaining_capacity()
-        return max(int(downstream_capacity/(2 * self.expansion_factor)), MIN_BATCH_SIZE)
+        min_downstream_capacity = MAX_BATCH_SIZE
+        for output_queue in self.output_queues:
+            downstream_capacity = await output_queue.remaining_capacity()
+            min_downstream_capacity = min(min_downstream_capacity, downstream_capacity)
+
+        if min_downstream_capacity == 0:
+            return 0
+        else:
+            return max(int(min_downstream_capacity/(2 * self.expansion_factor)), MIN_BATCH_SIZE)
 
     async def get_ready_events(self)->List[Envelope[IN_EVENT_TYPE]]:
         batch_size = await self.input_batch_size()
-        return await self.input_queue.get_events(self.id, batch_size)
+        if batch_size > 0:
+            result =  await self.input_queue.get_events(self.id, batch_size)
+            logging.debug(f'{self} attempted to read up to {batch_size} events from input queue and received  {len(result)}.')
+        else:
+            result = []
+            logging.debug(f"{self} not reading input events while at least one output queues is full")
+
+        return result
 
     async def process(self)->None:
-        if len(self.in_out_buffer.unsent_out_events) == 0 and not self.finished:
-            events_to_read = int(await self.output_queue.remaining_capacity() / self.expansion_factor)
-            if events_to_read > 0:
-                ready_events = await self.input_queue.get_events(self.id, events_to_read)
-                logging.debug(f'{self} attempted to read up to {events_to_read} events from input queue and received  {len(ready_events)}.')
+        if self.total_unsent_events() == 0 and not self.finished:
+            ready_events = await self.get_ready_events()
+            for envelope in ready_events:
+                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                    output = self.handle_event(envelope)
+                    for in_out_buffer in self.in_out_buffers:
+                        in_out_buffer.record_split_event(output)
+                elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                    self.finished = True
+                    for in_out_buffer in self.in_out_buffers:
+                        in_out_buffer.record_1_1(envelope)
+                else:
+                    raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
 
-                for envelope in ready_events:
-                    if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                        output = self.handle_event(envelope)
-                        self.in_out_buffer.record_split_event(output)
-                    elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                        self.finished = True
-                        self.in_out_buffer.record_1_1(envelope)
-                    else:
-                        raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
-            else:
-                logging.debug(f"{self} not reading input events while output queue is full")
+        if self.total_unsent_events() > 0:
+            min_input_events_to_acknowledge = MAX_BATCH_SIZE
+            for in_out_buffer, output_queue in zip(self.in_out_buffers, self.output_queues):
+                logging.debug(f'{self} attempting to deliver  { len(in_out_buffer.unsent_out_events)}  output events to {output_queue}')
+                consumed_events = await output_queue.enqueue(in_out_buffer.unsent_out_events)
+                logging.debug(f'{self} delivered  {consumed_events}  output events to {output_queue}')
+                input_events_to_acknowledge = in_out_buffer.record_delivered_out_events(consumed_events)
+                min_input_events_to_acknowledge = min(min_input_events_to_acknowledge, input_events_to_acknowledge)
 
-        if len(self.in_out_buffer.unsent_out_events) > 0:
-            logging.debug(f'{self} attempting to deliver  { len(self.in_out_buffer.unsent_out_events)}  output events')
-            consumed_events = await self.output_queue.enqueue(self.in_out_buffer.unsent_out_events)
-            logging.debug(f'{self} delivered  {consumed_events}  output events')
-            if consumed_events > 0:
-                input_events_to_acknowledge = self.in_out_buffer.record_delivered_out_events(consumed_events)
-                await self.input_queue.acknowledge_events(self.id, input_events_to_acknowledge)
-                logging.debug(f'{self} acknowledged {input_events_to_acknowledge} input events')
+            if min_input_events_to_acknowledge > 0:
+                await self.input_queue.acknowledge_events(self.id, min_input_events_to_acknowledge)
+                logging.debug(f'{self} acknowledged {min_input_events_to_acknowledge} input events')
 
-
+    def total_unsent_events(self)->int:
+        return  sum([len(buffer.unsent_out_events) for buffer in self.in_out_buffers])
 
     @abstractmethod
     def handle_event(self, event: Envelope[IN_EVENT_TYPE])->List[Envelope[EVENT_TYPE]]:
         pass
 
 class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, producer_fn: ProducerFn, init_fn: InitFn = None):
-        Worker.__init__(self, init_fn)
+    def __init__(self, *, producer_fn: ProducerFn, preferred_network: str, outboxes: List[List[Address]], init_fn: InitFn = None):
+        Worker.__init__(self, init_fn = init_fn, preferred_network=preferred_network, outboxes=outboxes)
         self.producer_fn = producer_fn
 
     async def init(self):
@@ -106,13 +147,14 @@ class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, consumer_fn: ConsumerFn, init_fn: InitFn = None):
-        Worker.__init__(self, init_fn)
+    def __init__(self, *, consumer_fn: ConsumerFn, preferred_network: str, input_queue_size: int, init_fn: InitFn = None):
+        Worker.__init__(self, init_fn=init_fn, preferred_network=preferred_network, input_queue_size=input_queue_size)
         self.consumer_fn = consumer_fn
 
     async def init(self):
         await super().init()
-        self.output_queue = SinkAdapter(self.consumer_fn, self.state)
+        self.output_queues = [SinkAdapter(self.consumer_fn, self.state)]
+        self.in_out_buffers = [InOutBuffer()]
 
     def handle_event(self, event: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
         # sinks do not currently transform events
@@ -120,8 +162,8 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class SplitWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, split_fn: SplitFn, expansion_factor: int, init_fn: InitFn = None):
-        Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor)
+    def __init__(self, *, split_fn: SplitFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None):
+        Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor, preferred_network=preferred_network, input_queue_size=input_queue_size, outboxes = outboxes)
         self.split_fn = split_fn
 
     def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:
@@ -158,16 +200,16 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
 # The functions of the SinkAdapter are to emulate an OutputQueue and to remove envelopes from the raw events
 # before sending them to the consumer - note that it will swallow processing instructions without
-# processing them (they would have already been processed during the "transform" stage.  The choice to send processing
-# instructions to the SinkAdapter was made because there is a need to accurately acknowledge consumed events, both
-# regular and processing instructions, also there is a need to maintain ordering of all events and lastly, its
-# important to send batches of events to the consumer whenever possible.
+# processing them because they would have already been processed during the "transform" stage.  The choice to send
+# processing instructions to the SinkAdapter was made because there is a need to accurately acknowledge consumed
+# events, both regular and processing instructions, also there is a need to maintain ordering of all events and lastly,
+# it is important to send batches of events to the consumer whenever possible.
 #
 # The option of just removing the processing instructions from the stream would result in missing or mis-aligned
 # acknowledgements back to the input.  Each event of either type must be specifically acknowledged in sequence.
 # One option would be to just iterate through the batch of events one at a time, forwarding only the regular events,
 # acknowledging those as the consumer consumes them and handling processing instruction acknowledgements outside
-# the Sink Adapter but we need to send to the consumer in batches. So, we walk through the list of events in
+# the Sink Adapter, but we need to send to the consumer in batches. So, we walk through the list of events in
 # order, assembling batches of contiguous regular events and sending them to the consumer, acknowledging the
 # corresponding input events, and then handling any intervening processing instructions outside the consumer.
 #

@@ -2,9 +2,9 @@ import asyncio
 import logging
 from typing import Iterator, List
 
-from flow_engine import FlowEngine, DeployRequest, FlowEngineClient
+from reflow.flow_engine import FlowEngine, FlowEngineClient
 from reflow import flow_connector_factory, EventSource, EventSink
-from internal.zmq import ZMQClient
+from reflow.cluster import FlowCluster
 from reflow.typedefs import EndOfStreamException
 
 test_data = ["alpha", "beta", "gamma"]
@@ -33,11 +33,12 @@ source.send_to(sink)
 
 
 async def main():
-    with FlowEngine(100, ['ipc://5001']) as engine:
+    preferred_network = '127.0.0.1'
+    with FlowEngine(100, bind_addresses = ['ipc://5001'], preferred_network=preferred_network) as engine:
         engine_task = asyncio.create_task(engine.run())
-        with FlowEngineClient('ipc://5001') as client:
-            await client.deploy(source)
-            logging.info('Deployed flow')
+        cluster = FlowCluster(engine_addresses=['ipc://5001'], preferred_network=preferred_network)
+        await cluster.deploy(source)
+        logging.info('Deployed flow')
 
         await engine.request_shutdown()
         await engine_task
