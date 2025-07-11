@@ -4,7 +4,7 @@ import random
 import time
 from typing import List, TypeVar, Generic
 
-from cluster import FlowCluster
+from reflow.cluster import FlowCluster
 from reflow import flow_connector_factory, EventSource, EventSink, Splitter
 from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
