@@ -16,7 +16,7 @@ class Address:
 
 
 def ipc_address_for_port(port: int)->str:
-    return f'ipc://service_{port:04d}'
+    return f'ipc:///tmp/service_{port:04d}.sock'
 
 def get_preferred_interface_ip(preferred_network: str)->str:
     logging.debug(f'looking for a bind address on this host that starts with {preferred_network}')

@@ -37,9 +37,9 @@ source.send_to(sink)
 
 async def main():
     preferred_network = '127.0.0.1'
-    with FlowEngine(100, bind_addresses = ['ipc://5001'], preferred_network=preferred_network) as engine:
+    with FlowEngine(100, bind_addresses = ['ipc:///tmp/service_5001.sock'], preferred_network=preferred_network) as engine:
         engine_task = asyncio.create_task(engine.run())
-        cluster = FlowCluster(engine_addresses=['ipc://5001'], preferred_network=preferred_network)
+        cluster = FlowCluster(engine_addresses=['ipc:///tmp/service_5001.sock'], preferred_network=preferred_network)
         await cluster.deploy(source)
         logging.info('Deployed flow')
 
