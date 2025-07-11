@@ -17,13 +17,16 @@ def iterator_source(data: List[str])->Iterator[str]:
 # noinspection PyUnusedLocal
 def iterator_producer(it: Iterator[str], limit: int)->List[str]:
     try:
-        return [next(it)]
+        result = next(it)
+        logging.info(f"PRODUCING: {result}")
+        return [result]
     except StopIteration:
+        logging.info("END OF STREAM")
         raise EndOfStreamException
 
 def debug_consumer(events: List[str])->int:
     for event in events:
-        logging.info(f'EVENT: {event}')
+        logging.info(f'CONSUMING: {event}')
 
     return len(events)
 
