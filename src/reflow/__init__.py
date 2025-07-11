@@ -8,11 +8,12 @@ from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, Consumer
 
 
 class FlowStage:
-    def __init__(self, init_fn: InitFn = None):
+    def __init__(self, init_fn: InitFn = None, max_workers:int = 0):
         self.init_fn = init_fn
         self.state = None
         self.downstream_stages = []
         self.exit_stack = ExitStack()
+        self.max_workers = max_workers
 
     def send_to(self, next_stage: "FlowStage")->"FlowStage":
         self.downstream_stages.append(next_stage)
@@ -23,8 +24,8 @@ class FlowStage:
         pass
 
 class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, init_fn: InitFn = None):
-        FlowStage.__init__(self, init_fn)
+    def __init__(self, init_fn: InitFn = None, max_workers:int = 0):
+        FlowStage.__init__(self, init_fn, max_workers=max_workers)
         self.producer_fn = None
 
     def with_producer_fn(self, producer_fn: ProducerFn)->Self:
@@ -36,8 +37,8 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
 
 class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, init_fn: InitFn = None):
-        FlowStage.__init__(self, init_fn)
+    def __init__(self, init_fn: InitFn = None, max_workers=0):
+        FlowStage.__init__(self, init_fn, max_workers=max_workers)
         self.consumer_fn = None
 
     def with_consumer_fn(self, consumer_fn: ConsumerFn)->Self:
@@ -53,8 +54,8 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
 
 class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, expansion_factor: int, init_fn: InitFn = None):
-        FlowStage.__init__(self, init_fn=init_fn)
+    def __init__(self, expansion_factor: int, init_fn: InitFn = None, max_workers = 0):
+        FlowStage.__init__(self, init_fn=init_fn, max_workers=max_workers)
         self.expansion_factor = expansion_factor
         self.split_fn = None
 

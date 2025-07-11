@@ -6,7 +6,7 @@ from contextlib import ExitStack
 from typing import Generic, List
 
 from reflow.internal import Envelope, INSTRUCTION
-from reflow.internal.edge_router import LoadBalancingEdgeRouter
+from reflow.internal.edge_router import LoadBalancingEdgeRouter, RoundRobinEdgeRouter
 from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.internal.network import Address
@@ -51,7 +51,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             self.exit_stack.enter_context(self.input_queue)
 
         if outboxes:
-            self.output_queues = [ LoadBalancingEdgeRouter(outbox_addr_list, preferred_network) for outbox_addr_list in outboxes ]
+            self.output_queues = [ RoundRobinEdgeRouter(outbox_addr_list, preferred_network) for outbox_addr_list in outboxes ]
             self.in_out_buffers = [ InOutBuffer() for _ in outboxes]
             for outbox in self.output_queues:
                 self.exit_stack.enter_context(outbox)

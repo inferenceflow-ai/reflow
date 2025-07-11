@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import List
 
 from reflow.flow_engine import FlowEngineClient
@@ -20,7 +21,13 @@ class FlowCluster:
 
         # inboxes is the list of inboxes for this stage
         inboxes = []
-        for address in self.engine_addresses:
+        if flow_stage.max_workers > 0:
+            m = min(flow_stage.max_workers, len(self.engine_addresses))
+            target_addresses = random.sample(self.engine_addresses, m)
+        else:
+            target_addresses = self.engine_addresses
+
+        for address in target_addresses:
             logging.info(f'Deploying {flow_stage} to engine at {address}')
             with FlowEngineClient(address) as engine:
                 inbox = await engine.deploy_stage(flow_stage, outboxes=outboxes, network=self.preferred_network)
@@ -28,3 +35,9 @@ class FlowCluster:
                     inboxes.append(inbox)
 
         return inboxes
+
+    async def request_shutdown(self):
+        for engine_addr in  self.engine_addresses:
+            with FlowEngineClient(engine_addr) as engine:
+                await engine.request_shutdown()
+                logging.info(f'Requested shutdown of engine at {engine_addr}')

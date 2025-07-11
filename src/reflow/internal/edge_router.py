@@ -1,3 +1,5 @@
+import abc
+from abc import abstractmethod
 from contextlib import ExitStack
 from typing import List
 
@@ -7,7 +9,9 @@ from reflow.internal.event_queue import EventQueueClient, OutputQueue, local_eve
 from reflow.internal.network import Address, get_preferred_interface_ip
 
 
-class LoadBalancingEdgeRouter(OutputQueue[EVENT_TYPE]):
+MAX_BATCH_SIZE = 10_000
+
+class EdgeRouter(OutputQueue[EVENT_TYPE], abc.ABC):
     def __init__(self, outbox_addresses: List[Address], preferred_network: str):
         self.exit_stack = ExitStack()
         self.outboxes = []
@@ -24,14 +28,26 @@ class LoadBalancingEdgeRouter(OutputQueue[EVENT_TYPE]):
 
             self.outboxes.append(outbox)
 
-        self.shortest_event_queue = None
-        self.shortest_event_queue_capacity = 0
-
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         return self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    @abstractmethod
+    async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
+        pass
+
+    @abstractmethod
+    async def remaining_capacity(self)->int:
+        pass
+
+
+class LoadBalancingEdgeRouter(EdgeRouter[EVENT_TYPE]):
+    def __init__(self, outbox_addresses: List[Address], preferred_network: str):
+        EdgeRouter.__init__(self, outbox_addresses=outbox_addresses, preferred_network=preferred_network)
+        self.shortest_event_queue = None
+        self.shortest_event_queue_capacity = 0
 
     async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
         if not self.shortest_event_queue:
@@ -50,4 +66,25 @@ class LoadBalancingEdgeRouter(OutputQueue[EVENT_TYPE]):
                 self.shortest_event_queue_capacity = capacity
 
         return self.shortest_event_queue_capacity
+
+
+class RoundRobinEdgeRouter(EdgeRouter[EVENT_TYPE]):
+    def __init__(self, outbox_addresses: List[Address], preferred_network: str):
+        EdgeRouter.__init__(self, outbox_addresses=outbox_addresses, preferred_network=preferred_network)
+        self.next = 0
+
+    async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
+        outbox = self.outboxes[self.next % len(self.outboxes)]
+        self.next += 1
+
+        result = await outbox.enqueue(events)
+        return result
+
+    async def remaining_capacity(self)->int:
+        result = MAX_BATCH_SIZE
+        for queue in self.outboxes:
+            capacity = await queue.remaining_capacity()
+            result = min(result, capacity)
+
+        return result
 

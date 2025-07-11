@@ -1,12 +1,13 @@
 import argparse
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import List, Any, Optional
 
-from reflow.internal.worker import SourceAdapter
 from reflow import FlowStage
 from reflow.internal.network import Address
+from reflow.internal.worker import SourceAdapter
 from reflow.internal.zmq import ZMQServer, ZMQClient
 
 DEFAULT_QUEUE_SIZE = 10_000
@@ -60,7 +61,7 @@ class FlowEngine(ZMQServer):
             raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
     async def run(self):
-        logging.info("FlowEngine started")
+        logging.info("(%d) FlowEngine Started", os.getpid())
         while True:
             if len(self.workers) > 0:
                 for worker in self.workers.copy():
@@ -80,7 +81,7 @@ class FlowEngine(ZMQServer):
 
             await asyncio.sleep(0) # yield to other tasks
 
-        logging.info("FlowEngine stopped")
+        logging.info("(%d) FlowEngine stopped", os.getpid())
 
     async def deploy_stage(self, stage: FlowStage, outboxes: List[List[Address]], network: str)->Address | None:
         worker = stage.build_worker(input_queue_size=self.default_queue_size, preferred_network=network, outboxes=outboxes)
