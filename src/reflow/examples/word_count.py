@@ -4,6 +4,7 @@ import random
 import time
 from typing import List, TypeVar, Generic
 
+from cluster import FlowCluster
 from reflow import flow_connector_factory, EventSource, EventSink, Splitter
 from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
@@ -101,9 +102,10 @@ async def main():
     sink = EventSink().with_consumer_fn(counting_sink)
     source.send_to(splitter).send_to(sink)
 
-    with FlowEngine(10_000, bind_addresses=['ipc://5555']) as flow_engine:
-        await flow_engine.deploy(source)
+    with FlowEngine(10_000, bind_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1') as flow_engine:
         task = asyncio.create_task(flow_engine.run())
+        cluster = FlowCluster(engine_addresses = ['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
+        await cluster.deploy(source)
         await flow_engine.request_shutdown()
         await task
         t2 = time.perf_counter(), time.process_time()
