@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import List, TypeVar, Generic
 
+from reflow.cluster import FlowCluster
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
@@ -25,28 +26,20 @@ class ListSource(Generic[T]):
         return result
 
 
-class ListSink(Generic[T]):
-    def __init__(self, consumed_events: List[T]):
-        self.results = consumed_events
+def slow_sink(events: List[T])->int:
+    global consumed_event_list
+    if len(events) == 0:
+        return 0
 
-    def slow_sink(self, events: List[T])->int:
-        if len(events) == 0:
-            return 0
+    consumed_events = max(int(len(events) / 2), 1)
+    consumed_event_list.extend(events[0:consumed_events])
 
-        consumed_events = max(int(len(events) / 2), 1)
-        self.results.extend(events[0:consumed_events])
-
-        return consumed_events
+    return consumed_events
 
 
 @flow_connector_factory
 def data_source(data):
     return ListSource(data)
-
-
-@flow_connector_factory
-def sink(consumed_events: List[int]):
-    return ListSink(consumed_events)
 
 
 TEST_EVENT_COUNT = 100
@@ -55,14 +48,17 @@ source_event_list = [i for i in range(TEST_EVENT_COUNT)]
 
 async def main():
     event_source = EventSource(data_source(source_event_list)).with_producer_fn(ListSource.get_data)
-    event_sink = EventSink(sink(consumed_event_list)).with_consumer_fn(ListSink.slow_sink)
+    event_sink = EventSink().with_consumer_fn(slow_sink)
     event_source.send_to(event_sink)
 
-    with FlowEngine(default_queue_size=32, bind_addresses=['ipc://5555']) as flow_engine:
-        await flow_engine.deploy(event_source)
+    with FlowEngine(default_queue_size=32, bind_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1') as flow_engine:
         flow_engine_task = asyncio.create_task(flow_engine.run())
+        cluster = FlowCluster(engine_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
+        await cluster.deploy(event_source)
         await flow_engine.request_shutdown()
         await flow_engine_task
+
+    logging.info("exiting")
 
 
 logging.basicConfig(level=logging.INFO)

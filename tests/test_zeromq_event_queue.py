@@ -6,8 +6,8 @@ from reflow.internal.event_queue import EventQueueClient, DequeueEventQueue
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    with DequeueEventQueue(6, ["ipc://basic_test"]):
-        with EventQueueClient("ipc://basic_test") as client:
+    with DequeueEventQueue(6, bind_addresses = ["ipc:///tmp/basic_test.sock"]):
+        with EventQueueClient("ipc:///tmp/basic_test.sock") as client:
             await client.enqueue(wrap(["a","b","c"]))
 
             result = await client.get_events("frodo", 2)
