@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
@@ -106,6 +107,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                     for in_out_buffer in self.in_out_buffers:
                         in_out_buffer.record_split_event(output)
                 elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                    logging.debug(f'({os.getpid()}) {self} received END_OF_STREAM instruction')
                     self.finished = True
                     for in_out_buffer in self.in_out_buffers:
                         in_out_buffer.record_1_1(envelope)

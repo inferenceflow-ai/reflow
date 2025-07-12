@@ -51,7 +51,7 @@ async def main(addrs: List[str]):
     await cluster.request_shutdown()
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     preferred_network = '127.0.0.1'
     engine_addresses = ['ipc:///tmp/service_5001.sock', 'ipc:///tmp/service_5002.sock']
     multiprocessing.set_start_method('fork')

@@ -29,3 +29,17 @@ If it is, it will first look for "inbox_nnnn" locally.  It may not be there beca
 be in a different process on the same host.  If it is there, it will use a "local" binding to that outbox.  If 
 it is not there, it will use the "IPC" binding to that outbox.  Finally, if the outbox is on a different host
 (the ip address is not on this host), it will connect using the TCP binding.
+
+## Handling Special Processing Instructions
+
+Some processing instructions should be sent to every outbox.  Let's say the processing instruction is half way 
+through a list of 20 events. Let's say there are 10 regular events before it and 9 after it.   If there is only one 
+outbox, we just send the whole batch and no matter how many are actually received, the reverse lookup will give the 
+correct number of input events to acknowledge.  
+
+What do we do if there are multiple outboxes ?  We send the first 10 regular events to the selected outbox and 
+we just acknowledge those 10.  That will leave events in the in_out_buffer that feeds this edge router.  Next 
+time the worker is called, we see that the first event is a processing instruction that needs to be sent to 
+every outbox.  We go ahead and enqueue it in every outbox and if that works, we return 1 from the router.enqueue 
+method. If we do not successfully deliver to one or more outboxes then we return 0, _which means that processing 
+instruction will be re-delivered to one or more nodes_.  

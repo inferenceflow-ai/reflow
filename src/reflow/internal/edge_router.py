@@ -4,7 +4,7 @@ from contextlib import ExitStack
 from typing import List
 
 from reflow.typedefs import EVENT_TYPE
-from reflow.internal import Envelope
+from reflow.internal import Envelope, INSTRUCTION
 from reflow.internal.event_queue import EventQueueClient, OutputQueue, local_event_queue_registry
 from reflow.internal.network import Address, get_preferred_interface_ip
 
@@ -74,11 +74,28 @@ class RoundRobinEdgeRouter(EdgeRouter[EVENT_TYPE]):
         self.next = 0
 
     async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
-        outbox = self.outboxes[self.next % len(self.outboxes)]
-        self.next += 1
+        first_pi_index = len(events)
+        for i in range(len(events)):
+            if events[i].instruction != INSTRUCTION.PROCESS_EVENT:
+                first_pi_index = i
+                break
 
-        result = await outbox.enqueue(events)
-        return result
+        if first_pi_index == 0:
+            success_count = 0
+            for outbox in self.outboxes:
+                success_count += await outbox.enqueue([events[0]])
+
+            if success_count < len(self.outboxes):
+                return 0
+            else:
+                return 1
+
+        else:
+            outbox = self.outboxes[self.next % len(self.outboxes)]
+            self.next += 1
+
+            result = await outbox.enqueue(events[0:first_pi_index])
+            return result
 
     async def remaining_capacity(self)->int:
         result = MAX_BATCH_SIZE
