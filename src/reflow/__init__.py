@@ -3,8 +3,8 @@ from contextlib import ExitStack
 from typing import Generic, Callable, Awaitable, Self, Any, List
 
 from reflow.internal.network import Address
-from reflow.internal.worker import Worker, SourceWorker, SinkWorker, SplitWorker
-from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, SplitFn, IN_EVENT_TYPE
+from reflow.internal.worker import Worker, SourceWorker, SinkWorker, TransformWorker
+from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, TransformerFn, IN_EVENT_TYPE
 
 
 class FlowStage:
@@ -53,18 +53,18 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         pass
 
 
-class Splitter(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
+class EventTransformer(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
     def __init__(self, expansion_factor: int, init_fn: InitFn = None, max_workers = 0):
         FlowStage.__init__(self, init_fn=init_fn, max_workers=max_workers)
         self.expansion_factor = expansion_factor
-        self.split_fn = None
+        self.transform_fn = None
 
-    def with_split_fn(self, split_fn: SplitFn)->Self:
-        self.split_fn = split_fn
+    def with_transform_fn(self, transform_fn: TransformerFn)->Self:
+        self.transform_fn = transform_fn
         return self
 
-    def build_worker(self,*, preferred_network: str, input_queue_size: int = None, outboxes: List[List[Address]] = None)->SplitWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
-        return SplitWorker(init_fn=self.init_fn, split_fn=self.split_fn, expansion_factor=self.expansion_factor, input_queue_size = input_queue_size, outboxes=outboxes, preferred_network=preferred_network)
+    def build_worker(self,*, preferred_network: str, input_queue_size: int = None, outboxes: List[List[Address]] = None)->TransformWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
+        return TransformWorker(init_fn=self.init_fn, transform_fn=self.transform_fn, expansion_factor=self.expansion_factor, input_queue_size = input_queue_size, outboxes=outboxes, preferred_network=preferred_network)
 
 
 def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:

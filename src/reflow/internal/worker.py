@@ -12,7 +12,7 @@ from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.internal.network import Address
 from reflow.typedefs import EndOfStreamException
-from reflow.typedefs import IN_EVENT_TYPE, SplitFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
+from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
 
 MIN_BATCH_SIZE = 10
@@ -163,16 +163,16 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         return [event]
 
 
-class SplitWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, split_fn: SplitFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None):
+class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
+    def __init__(self, *, transform_fn: TransformerFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None):
         Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor, preferred_network=preferred_network, input_queue_size=input_queue_size, outboxes = outboxes)
-        self.split_fn = split_fn
+        self.transform_fn = transform_fn
 
     def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:
         if self.state:
-            result =  self.split_fn(self.state, envelope.event)
+            result =  self.transform_fn(self.state, envelope.event)
         else:
-            result = self.split_fn(envelope.event)
+            result = self.transform_fn(envelope.event)
 
         return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
 

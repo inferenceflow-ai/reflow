@@ -88,10 +88,15 @@ def counting_sink(events: List[str])->int:
     word_count += result
     return result
 
+# noinspection PyUnusedLocal
+def null_sink(events: List[str])-> None:
+    pass
+
 def split_fn(sentence):
     return sentence.split()
 
 async def main():
+    t1 = time.perf_counter(), time.process_time()
     source = EventSource(data_source(hamlet_sentences, 100_000)).with_producer_fn(TestDataConnection.get_data)
     splitter = EventTransformer(expansion_factor=40).with_transform_fn(split_fn)
     sink = EventSink().with_consumer_fn(counting_sink)
