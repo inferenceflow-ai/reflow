@@ -70,9 +70,27 @@ class TestDataConnection(Generic[T]):
             raise EndOfStreamException()
 
 
+class Counter:
+    def __enter__(self):
+        self.value = 0
+
+    def increment(self):
+        self.value += 1
+
+    def get(self):
+        return self.value
+
+    def transform_fn(self, event):
+        self.increment()
+        return []
+
 @flow_connector_factory
 def data_source(data, stop_after):
     return TestDataConnection(data, stop_after)
+
+@flow_connector_factory
+def new_counter():
+    return Counter()
 
 def debug_sink(events: List[str])-> int:
     for event in events:
@@ -92,9 +110,17 @@ def split_fn(sentence):
     return sentence.split()
 
 async def main():
-    source = EventSource(data_source(hamlet_sentences, 100_000)).with_producer_fn(TestDataConnection.get_data)
-    splitter = EventTransformer(expansion_factor=40).with_transform_fn(split_fn)
-    sink = EventSink().with_consumer_fn(counting_sink)
+    source = (EventSource(data_source(hamlet_sentences, 100_000))
+              .with_producer_fn(TestDataConnection.get_data))
+    splitter = (EventTransformer()
+                .with_expansion_factor(30).
+                with_transform_fn(split_fn))
+    counter = (EventTransformer(new_counter())
+               .with_expansion_factor(.01)
+               .with_grouping_key_fn(lambda event: event)
+               .with_transform_fn(Counter.transform_fn)
+    sink = EventSink().with_consumer_fn(debug_sink)
+
     source.send_to(splitter).send_to(sink)
 
     with FlowEngine(10_000, bind_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1') as flow_engine:

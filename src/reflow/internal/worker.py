@@ -3,6 +3,7 @@ import logging
 import os
 import uuid
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from contextlib import ExitStack
 from typing import Generic, List
 
@@ -11,7 +12,7 @@ from reflow.internal.edge_router import LoadBalancingEdgeRouter, RoundRobinEdgeR
 from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.internal.network import Address
-from reflow.typedefs import EndOfStreamException
+from reflow.typedefs import EndOfStreamException, GroupingFn, GroupInitFn, GroupingKeyFn
 from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE
 
@@ -35,9 +36,19 @@ MAX_BATCH_SIZE = 10_000
 
 
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, preferred_network: str, init_fn: InitFn = None, expansion_factor = 1, input_queue_size: int = None, outboxes: List[List[Address]] = None):
+    def __init__(self, *,
+                 preferred_network: str,
+                 init_fn: InitFn = None,
+                 group_init_fn: GroupInitFn = None,
+                 grouping_key_fn: GroupingKeyFn = None,
+                 expansion_factor = 1,
+                 input_queue_size: int = None,
+                 outboxes: List[List[Address]] = None):
         self.init_fn = init_fn
+        self.group_init_fn = group_init_fn
+        self.grouping_key_fn = grouping_key_fn
         self.state = None
+        self.group_state = None
         self.input_queue = None
         self.expansion_factor = expansion_factor
         self.id = str(uuid.uuid4())
@@ -71,6 +82,9 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         if self.init_fn and not self.state:
             # noinspection PyTypeChecker
             self.state = await asyncio.get_running_loop().run_in_executor(None, self.init_fn)
+
+        if self.group_init_fn:
+            self.group_state = defaultdict(lambda: self.group_init_fn(self.state))
 
     async def input_batch_size(self)->int:
         """
@@ -164,8 +178,8 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, transform_fn: TransformerFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None):
-        Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor, preferred_network=preferred_network, input_queue_size=input_queue_size, outboxes = outboxes)
+    def __init__(self, *, transform_fn: TransformerFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None, grouping_fn: GroupingFn = None):
+        Worker.__init__(self, init_fn=init_fn, grouping_fn=grouping_fn, expansion_factor=expansion_factor, preferred_network=preferred_network, input_queue_size=input_queue_size, outboxes = outboxes)
         self.transform_fn = transform_fn
 
     def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:
