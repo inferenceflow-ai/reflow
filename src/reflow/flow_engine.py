@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import itertools
 import logging
 import os
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from typing import List, Any, Optional
 
 from reflow import FlowStage
 from reflow.internal.network import Address
-from reflow.internal.worker import SourceAdapter
+from reflow.internal.worker import SourceAdapter, WorkerId
 from reflow.internal.zmq import ZMQServer, ZMQClient
 
 DEFAULT_QUEUE_SIZE = 10_000
@@ -42,13 +43,16 @@ class ShutdownResponse:
 
 
 class FlowEngine(ZMQServer):
-    def __init__(self, default_queue_size:int, preferred_network: str, bind_addresses: List[str]):
+    def __init__(self, *, cluster_number: int, cluster_size: int, default_queue_size:int, preferred_network: str, bind_addresses: List[str]):
         ZMQServer.__init__(self, bind_addresses=bind_addresses)
         self.preferred_network = preferred_network
         self.default_queue_size = default_queue_size
         self.running = True
         self.workers = []
         self.shutdown_requested = False
+        self.cluster_number = cluster_number
+        self.cluster_size = cluster_size
+        self.worker_id = itertools.count()
 
     async def process_request(self, request: Any) -> Any:
         if isinstance(request, DeployStageRequest):
@@ -85,6 +89,7 @@ class FlowEngine(ZMQServer):
 
     async def deploy_stage(self, stage: FlowStage, outboxes: List[List[Address]], network: str)->Address | None:
         worker = stage.build_worker(input_queue_size=self.default_queue_size, preferred_network=network, outboxes=outboxes)
+        worker.id = WorkerId(cluster_number=self.cluster_number, worker_number=next(self.worker_id))
         await worker.init()
         self.workers.append(worker)
         if worker.input_queue and not isinstance(worker.input_queue, SourceAdapter):

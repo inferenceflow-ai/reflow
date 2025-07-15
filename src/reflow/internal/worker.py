@@ -4,6 +4,7 @@ import os
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
+from dataclasses import dataclass
 from typing import Generic, List
 
 from reflow.internal import Envelope, INSTRUCTION
@@ -33,19 +34,29 @@ MAX_BATCH_SIZE = 10_000
 #  - after this, some events may remain in the output event list
 #
 
+@dataclass(frozen=True)
+class WorkerId:
+    cluster_number: int
+    worker_number: int
 
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, preferred_network: str, init_fn: InitFn = None, expansion_factor = 1, input_queue_size: int = None, outboxes: List[List[Address]] = None):
+    def __init__(self, *,
+                 preferred_network: str,
+                 init_fn: InitFn = None,
+                 expansion_factor = 1,
+                 input_queue_size: int = None,
+                 outboxes: List[List[Address]] = None):
         self.init_fn = init_fn
         self.state = None
         self.input_queue = None
         self.expansion_factor = expansion_factor
-        self.id = str(uuid.uuid4())
+        self.id = None   # will be set immediately after construction
         self.finished = False
         self.preferred_network = preferred_network
         self.output_queues = None
         self.in_out_buffers = None
         self.exit_stack = ExitStack()
+        self.last_event_seen = {}
 
         if not isinstance(self, SourceWorker):
             self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)

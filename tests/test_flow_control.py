@@ -51,7 +51,11 @@ async def main():
     event_sink = EventSink().with_consumer_fn(slow_sink)
     event_source.send_to(event_sink)
 
-    with FlowEngine(default_queue_size=32, bind_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1') as flow_engine:
+    with FlowEngine(cluster_number=0,
+                    cluster_size=1,
+                    default_queue_size=32,
+                    bind_addresses=['ipc:///tmp/service_5001.sock'],
+                    preferred_network='127.0.0.1') as flow_engine:
         flow_engine_task = asyncio.create_task(flow_engine.run())
         cluster = FlowCluster(engine_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
         await cluster.deploy(event_source)

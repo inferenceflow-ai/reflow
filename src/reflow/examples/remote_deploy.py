@@ -38,11 +38,15 @@ source = EventSource(iterator_source(test_data), max_workers=1).with_producer_fn
 sink = EventSink().with_consumer_fn(debug_consumer)
 source.send_to(sink)
 
-def engine_runner(bind_address: str):
-    asyncio.run(run_engine(bind_address))
+def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
+    asyncio.run(run_engine(cluster_number, cluster_size, bind_address))
 
-async def run_engine(bind_address: str):
-    with FlowEngine(100, bind_addresses=[bind_address], preferred_network='127.0.0.1') as engine:
+async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
+    with FlowEngine(cluster_number=cluster_number,
+                    cluster_size=cluster_size,
+                    default_queue_size=100,
+                    bind_addresses=[bind_address],
+                    preferred_network='127.0.0.1') as engine:
         await engine.run()
 
 async def main(addrs: List[str]):
@@ -55,7 +59,7 @@ if __name__ == '__main__':
     preferred_network = '127.0.0.1'
     engine_addresses = ['ipc:///tmp/service_5001.sock', 'ipc:///tmp/service_5002.sock']
     multiprocessing.set_start_method('fork')
-    engine_procs = [Process(target=engine_runner, args=[address]) for address in engine_addresses]
+    engine_procs = [Process(target=engine_runner, args=[n, len(engine_addresses), address]) for n, address in enumerate(engine_addresses)]
     for proc in engine_procs:
         proc.start()
 

@@ -43,3 +43,28 @@ time the worker is called, we see that the first event is a processing instructi
 every outbox.  We go ahead and enqueue it in every outbox and if that works, we return 1 from the router.enqueue 
 method. If we do not successfully deliver to one or more outboxes then we return 0, _which means that processing 
 instruction will be re-delivered to one or more nodes_.  
+
+## Duplicate Delivery
+
+In cases where a single batch of events must be delivered to different downstream workers, as with key based routing, 
+a backup in one downstream worker could create a situation where events are re-delivered to some downstream workers.
+To prevent actually re-processing these events, the following mechanism is used.  Each worker has a unique id an a 
+sequence number. The sequence number only increases and is carried on the envelope of the event.  When events are 
+enqueued (with the enqueue method) the sender id will be sent.  The recipient will use the sender id as a dictionary 
+key to look up the highest number seen.  Events less than or equal to that number will not be processed but they 
+will be counted in the return value of enqueue.
+
+One complication though.  The inbox of a worker will be receiving batches from multiple upstream workers.  Where 
+will the sender id come from ?  I'd rather not put it on every event but it appears I may have to. 
+
+Point of clarification... do I need to include a unique identifier of the worker or just the node ?  Two different 
+workers on the same node could send to the same outbox in the case of a merge-type stage.  So I guess I need to 
+identify the worker as well, or at least the job/stage.  That brings me back to needing to pass a rather large 
+uuid on the event.  OK, I know, worker ID will consist of a node id and a worker id.
+
+## Routing by Key
+
+Each engine will be started with a unique number which we will call the node number.  If there are N engines then the 
+unique numbers must be in the range 0 to N-1. Failing to do this will cause events to be missed.  When inboxes are 
+created, the address returned will include the node number.  
+
