@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from contextlib import ExitStack
 from typing import Generic, List
 
@@ -107,17 +108,27 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         if self.total_unsent_events() == 0 and not self.finished:
             ready_events = await self.get_ready_events()
             for envelope in ready_events:
-                if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                    output = self.handle_event(envelope)
-                    for in_out_buffer in self.in_out_buffers:
-                        in_out_buffer.record_split_event(output)
-                elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                    logging.debug(f'({os.getpid()}) {self} received END_OF_STREAM instruction')
-                    self.finished = True
-                    for in_out_buffer in self.in_out_buffers:
-                        in_out_buffer.record_1_1(envelope)
+                if envelope.source_id in self.last_event_seen:
+                    last_event = self.last_event_seen[envelope.source_id]
                 else:
-                    raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+                    last_event = envelope.sequence_num - 1
+
+                if envelope.sequence_num > last_event:
+                    if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                        output = self.handle_event(envelope)
+                        for in_out_buffer in self.in_out_buffers:
+                            in_out_buffer.record_split_event(output)
+                    elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
+                        logging.debug(f'({os.getpid()}) {self} received END_OF_STREAM instruction')
+                        self.finished = True
+                        for in_out_buffer in self.in_out_buffers:
+                            in_out_buffer.record_1_1(envelope)
+                    else:
+                        raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+
+                    self.last_event_seen[envelope.source_id] = envelope.sequence_num
+                else:
+                    logging.debug('ignoring previously seen event %s:%d', envelope.source_id, envelope.sequence_num)
 
         if self.total_unsent_events() > 0:
             min_input_events_to_acknowledge = MAX_BATCH_SIZE
