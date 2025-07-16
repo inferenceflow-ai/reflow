@@ -1,10 +1,10 @@
 from typing import List
 
-from reflow.internal import INSTRUCTION, Envelope
+from reflow.internal import INSTRUCTION, Envelope, WorkerId
 from reflow.internal.in_out_buffer import InOutBuffer
 
 def event(x: str):
-    return Envelope(INSTRUCTION.PROCESS_EVENT, x)
+    return Envelope(INSTRUCTION.PROCESS_EVENT, WorkerId(-1, -1), 0,  x)
 
 def events(l: List[str]):
     return [event(e) for e in l]
@@ -40,6 +40,6 @@ def test_empty_then_full():
     assert in_out_map.record_delivered_out_events(3) == 3
 
     for _  in range(3):
-        in_out_map.record_1_1("A")
+        in_out_map.record_1_1(event("A"))
 
     assert in_out_map.record_delivered_out_events(3) == 3

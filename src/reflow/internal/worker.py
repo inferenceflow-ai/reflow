@@ -1,20 +1,18 @@
 import asyncio
+import itertools
 import logging
 import os
-import uuid
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
-from dataclasses import dataclass
 from typing import Generic, List
 
-from reflow.internal import Envelope, INSTRUCTION
-from reflow.internal.edge_router import LoadBalancingEdgeRouter, RoundRobinEdgeRouter
+from reflow.internal import Envelope, INSTRUCTION, WorkerId
+from reflow.internal.edge_router import RoundRobinEdgeRouter
 from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue
 from reflow.internal.in_out_buffer import InOutBuffer
 from reflow.internal.network import Address
-from reflow.typedefs import EndOfStreamException
 from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
-    OUT_EVENT_TYPE
+    OUT_EVENT_TYPE, EndOfStreamException
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10_000
@@ -34,11 +32,6 @@ MAX_BATCH_SIZE = 10_000
 #  - after this, some events may remain in the output event list
 #
 
-@dataclass(frozen=True)
-class WorkerId:
-    cluster_number: int
-    worker_number: int
-
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *,
                  preferred_network: str,
@@ -57,6 +50,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         self.in_out_buffers = None
         self.exit_stack = ExitStack()
         self.last_event_seen = {}
+        self.event_counter = itertools.count()
 
         if not isinstance(self, SourceWorker):
             self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)
@@ -185,7 +179,7 @@ class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         else:
             result = self.transform_fn(envelope.event)
 
-        return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
+        return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter) ,event) for event in result]
 
 
 # The functions of the SourceAdapter are to emulate an input queue and to put envelopes around the raw events
@@ -193,6 +187,8 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
     def __init__(self, producer_fn: ProducerFn, state: STATE_TYPE = None):
         self.producer_fn = producer_fn
         self.state = state
+        self.event_counter = itertools.count()
+        self.id = WorkerId(cluster_number=-1, worker_number=-1)
 
     async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
         assert limit > 0
@@ -202,9 +198,9 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
             else:
                 result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, limit)
 
-            return [Envelope(INSTRUCTION.PROCESS_EVENT, event) for event in result]
+            return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), event) for event in result]
         except EndOfStreamException as _:
-            return [Envelope(INSTRUCTION.END_OF_STREAM)]
+            return [Envelope(INSTRUCTION.END_OF_STREAM, self.id, next(self.event_counter))]
 
     # this class does not support "acknowledge" functionality
     async def acknowledge_events(self, subscriber: str, n: int) -> None:

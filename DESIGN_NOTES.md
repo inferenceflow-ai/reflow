@@ -46,21 +46,17 @@ instruction will be re-delivered to one or more nodes_.
 
 ## Duplicate Delivery
 
-In cases where a single batch of events must be delivered to different downstream workers, as with key based routing, 
-a backup in one downstream worker could create a situation where events are re-delivered to some downstream workers.
-To prevent actually re-processing these events, the following mechanism is used.  Each worker has a unique id an a 
-sequence number. The sequence number only increases and is carried on the envelope of the event.  When events are 
-enqueued (with the enqueue method) the sender id will be sent.  The recipient will use the sender id as a dictionary 
-key to look up the highest number seen.  Events less than or equal to that number will not be processed but they 
-will be counted in the return value of enqueue.
+In cases where a single batch of events must be split up and delivered to different downstream workers, as with key 
+based routing, a backup in one downstream worker could create a situation where events are re-delivered to some 
+downstream workers. To prevent actually re-processing these events, the following mechanism is used.  Each worker has 
+a unique id and a sequence number. The sequence number only increases and is carried on the envelope of the event.  
+When events are enqueued (with the enqueue method) the sender id and sequence number will be in the envelop.  The 
+recipient will use the sender id as a dictionary key to look up the highest number seen.  Events less than or equal to 
+that number will not be processed but they will be counted in the return value of enqueue.
 
-One complication though.  The inbox of a worker will be receiving batches from multiple upstream workers.  Where 
-will the sender id come from ?  I'd rather not put it on every event but it appears I may have to. 
-
-Point of clarification... do I need to include a unique identifier of the worker or just the node ?  Two different 
-workers on the same node could send to the same outbox in the case of a merge-type stage.  So I guess I need to 
-identify the worker as well, or at least the job/stage.  That brings me back to needing to pass a rather large 
-uuid on the event.  OK, I know, worker ID will consist of a node id and a worker id.
+Sources will emit events that have been numbered but the events they read will generally not have sequence numbers 
+so if the source system (e.g. database) sends duplicate events, the source worker will not know and will treat them 
+as separate (though identical) events.
 
 ## Routing by Key
 
