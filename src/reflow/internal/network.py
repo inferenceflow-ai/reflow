@@ -15,6 +15,12 @@ class Address:
         return f'tcp://{self.ip}:{self.port}'
 
 
+@dataclass
+class QueueDescriptor:
+    address: Address
+    cluster_size: int
+    cluster_number: int
+
 def ipc_address_for_port(port: int)->str:
     return f'ipc:///tmp/service_{port:04d}.sock'
 

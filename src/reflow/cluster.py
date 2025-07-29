@@ -2,9 +2,9 @@ import logging
 import random
 from typing import List
 
-from reflow.flow_engine import FlowEngineClient
 from reflow import FlowStage
-from reflow.internal.network import Address
+from reflow.flow_engine import FlowEngineClient
+from reflow.internal.network import QueueDescriptor
 
 
 class FlowCluster:
@@ -12,7 +12,7 @@ class FlowCluster:
         self.engine_addresses = engine_addresses
         self.preferred_network = preferred_network
 
-    async def deploy(self, flow_stage: FlowStage)->List[Address]:
+    async def deploy(self, flow_stage: FlowStage)->List[QueueDescriptor]:
         # outboxes contains a list of outbox addresses for each downstream stage
         # i.e. it is a list of lists
         outboxes = []

@@ -62,5 +62,34 @@ as separate (though identical) events.
 
 Each engine will be started with a unique number which we will call the node number.  If there are N engines then the 
 unique numbers must be in the range 0 to N-1. Failing to do this will cause events to be missed.  When inboxes are 
-created, the address returned will include the node number.  
+created, the address returned will include the node number.  The key based router will have a function for extracting 
+the key from an event.  It will hash the key and determine it's modulus and then route to the inbox with the matching 
+cluster number.  
+
+However, this creates a complication because we generally prefer to send data in batches, but each event in a batch 
+may go to a different location.  How are we to acknowledge the correct number of input events ?  
+
+## Shutdown Problem
+
+When shutting down, I noticed the following happening.  In this example, there is a source, a sink and between them is
+a key based router.  Normally, the key based router sends events to only one downstream router but END_OF_STREAM 
+messages are sent to all downstream workers because, if they weren't, then some workers might not receive the it. 
+
+In this case, a source on engine1 forwards to a sink on engine 2.  However, engine 2 has already received a shutdown 
+message and has, in fact, already shut down.  The EventQueueClient on engine 1 blocked forever while trying to enqueue 
+the message.  This can be remedied with a timeout but then we have another problem. After the timeout, the message 
+would remain in the unsent messages list for that worker.  Having any messages in the unsent message list prevents 
+shutdown, the idea being that we need to finish processing all events in the batch before shutting down.  
+
+This suggests a 2 phase approach where draining occurs first, and then shutdown.  But how will engine 1 know if 
+engine 2 is ready for shutdown ?  Even if the Cluster coordinates it, how will the cluster know that an engine 
+has completed all work and is idle ?  Also, do I really need to shut down the engine or just undeploy all the 
+workers ?  Even assuming I just undeploy all the workers, I still have the same problem with outboxes being 
+undeployed.  I'll need an engine level way to check if all of the workers in a job have quiesced.  That's not so hard if 
+I actually have a way to pinpoint all of the workers for a job.  
+
+So, I need to add a list of workers for a job to each engine, as well as a way to identify a job.  Then, remove the 
+automatic shutdown of workers.  Instead, a command to wait for end of job, another to undeploy the job (if its in the 
+finished state) and another to stop the engine, if it has no running jobs.
+
 

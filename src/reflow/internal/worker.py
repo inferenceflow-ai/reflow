@@ -1,37 +1,50 @@
+import abc
 import asyncio
 import itertools
 import logging
 import os
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from contextlib import ExitStack
 from typing import Generic, List
 
 from reflow.internal import Envelope, INSTRUCTION, WorkerId
-from reflow.internal.edge_router import RoundRobinEdgeRouter
-from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue
+from reflow.internal.edge_router import EdgeRouter, KeyBasedEdgeRouter, LoadBalancingEdgeRouter, LocalEdgeRouter
+from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue, local_event_queue_registry
 from reflow.internal.in_out_buffer import InOutBuffer
-from reflow.internal.network import Address
+from reflow.internal.network import QueueDescriptor
 from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
-    OUT_EVENT_TYPE, EndOfStreamException
+    OUT_EVENT_TYPE, EndOfStreamException, KeyFn
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10_000
 
 
-# The back-pressure algorithm
-# - check output event list
-# - if there are no events in the output event list
-#   - read some number of events from input
-#   - process them, yielding output events which are placed in an output event list
-#   - record the output events in the in-out map
-#
-#  - deliver as many as possible of the output events to the output queue (usually all)
-#  - remove those events from the output event list
-#  - based on the in-out map, acknowledge the appropriate number of events from the input queue
-#  - trim the in/out map
-#  - after this, some events may remain in the output event list
-#
+class RoutingPolicy(abc.ABC):
+    @abstractmethod
+    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+        pass
+
+
+class KeyBasedRoutingPolicy(RoutingPolicy, Generic[EVENT_TYPE]):
+    def __init__(self, key_fn: KeyFn):
+        self.key_fn = key_fn
+
+    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+        return KeyBasedEdgeRouter(outbox_descriptor=outbox_descriptor,
+                                  preferred_network=preferred_network,
+                                  key_fn=self.key_fn)
+
+
+class LoadBalancedRoutingPolicy(RoutingPolicy):
+    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+        return LoadBalancingEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
+
+
+class LocalRoutingPolicy(RoutingPolicy):
+    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+        return LocalEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
+
+
 
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *,
@@ -39,7 +52,8 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  init_fn: InitFn = None,
                  expansion_factor = 1,
                  input_queue_size: int = None,
-                 outboxes: List[List[Address]] = None):
+                 outboxes: List[List[QueueDescriptor]] = None,
+                 routing_policies: List[RoutingPolicy] = None):
         self.init_fn = init_fn
         self.state = None
         self.input_queue = None
@@ -57,11 +71,24 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)
             self.exit_stack.enter_context(self.input_queue)
 
+            # note that the input queue has no "address" attribute until it's context manager __enter__ method
+            # has been called (see above)
+            local_event_queue_registry[self.input_queue.address] = self.input_queue
+
         if outboxes:
-            self.output_queues = [ RoundRobinEdgeRouter(outbox_addr_list, preferred_network) for outbox_addr_list in outboxes ]
-            self.in_out_buffers = [ InOutBuffer() for _ in outboxes]
-            for outbox in self.output_queues:
-                self.exit_stack.enter_context(outbox)
+            if len(routing_policies) != len(outboxes):
+                raise RuntimeError('Worker could not be constructed because '
+                                   'number of routing policies not equal number of downstream stages')
+
+            # the default routing algorithm keeps everything in the same process
+            self.output_queues = []
+            self.in_out_buffers = []
+            for n, queue_descriptor_list in enumerate(outboxes):
+                output_queue = routing_policies[n].build_router(outbox_descriptor=queue_descriptor_list,
+                                                                preferred_network=preferred_network)
+                self.output_queues.append(output_queue)
+                self.in_out_buffers.append(InOutBuffer())
+                self.exit_stack.enter_context(output_queue)
 
         else:
             self.output_queues = []
@@ -105,6 +132,19 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         return result
 
     async def process(self)->None:
+        # The back-pressure algorithm
+        # - check output event list
+        # - if there are no events in the output event list
+        #   - read some number of events from input
+        #   - process them, yielding output events which are placed in an output event list
+        #   - record the output events in the in-out map
+        #
+        #  - deliver as many as possible of the output events to the output queue (usually all)
+        #  - remove those events from the output event list
+        #  - based on the in-out map, acknowledge the appropriate number of events from the input queue
+        #  - trim the in/out map
+        #  - after this, some events may remain in the output event list
+        #
         if self.total_unsent_events() == 0 and not self.finished:
             ready_events = await self.get_ready_events()
             for envelope in ready_events:
@@ -151,17 +191,25 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         pass
 
 class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, producer_fn: ProducerFn, preferred_network: str, outboxes: List[List[Address]], init_fn: InitFn = None):
-        Worker.__init__(self, init_fn = init_fn, preferred_network=preferred_network, outboxes=outboxes)
+    def __init__(self, *, producer_fn: ProducerFn,
+                 preferred_network: str,
+                 outboxes: List[List[QueueDescriptor]],
+                 routing_policies: List[RoutingPolicy],
+                 init_fn: InitFn = None):
+        Worker.__init__(self, init_fn = init_fn,
+                        preferred_network=preferred_network,
+                        outboxes=outboxes,
+                        routing_policies=routing_policies)
         self.producer_fn = producer_fn
 
     async def init(self):
         await super().init()
         self.input_queue = SourceAdapter(self.producer_fn, self.state)
 
-    def handle_event(self, event: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
+    def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
         # sources do not currently transform events
-        return [event]
+        result = Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), envelope.event)
+        return [result]
 
 
 class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
@@ -180,8 +228,20 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, transform_fn: TransformerFn, expansion_factor: int, preferred_network: str, input_queue_size: int, outboxes: List[List[Address]], init_fn: InitFn = None):
-        Worker.__init__(self, init_fn=init_fn, expansion_factor=expansion_factor, preferred_network=preferred_network, input_queue_size=input_queue_size, outboxes = outboxes)
+    def __init__(self, *, transform_fn: TransformerFn,
+                 expansion_factor: int,
+                 preferred_network: str,
+                 input_queue_size: int,
+                 outboxes: List[List[QueueDescriptor]],
+                 routing_policies: List[RoutingPolicy],
+                 init_fn: InitFn = None):
+        Worker.__init__(self,
+                        init_fn=init_fn,
+                        expansion_factor=expansion_factor,
+                        preferred_network=preferred_network,
+                        input_queue_size=input_queue_size,
+                        outboxes = outboxes,
+                        routing_policies=routing_policies)
         self.transform_fn = transform_fn
 
     def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:

@@ -5,12 +5,13 @@ import os
 from multiprocessing import Process
 from typing import Iterator, List
 
+from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.cluster import FlowCluster
 from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
-test_data = ["alpha", "beta", "gamma"]
+test_data = ["alpha", "beta", "gamma", "delta", "epsilon"]
 
 @flow_connector_factory
 def iterator_source(data: List[str])->Iterator[str]:
@@ -34,9 +35,9 @@ def debug_consumer(events: List[str])->int:
 
     return len(events)
 
-source = EventSource(iterator_source(test_data), max_workers=1).with_producer_fn(iterator_producer)
+source = EventSource(iterator_source(test_data)).with_producer_fn(iterator_producer)
 sink = EventSink().with_consumer_fn(debug_consumer)
-source.send_to(sink)
+source.send_to(sink, routing_policy=KeyBasedRoutingPolicy(lambda event: event))
 
 def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
     asyncio.run(run_engine(cluster_number, cluster_size, bind_address))

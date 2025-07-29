@@ -1,5 +1,3 @@
-import dill
-
 from collections import deque, defaultdict
 from dataclasses import dataclass
 from typing import Protocol, TypeVar, List, Generic, Any
@@ -164,35 +162,22 @@ class EventQueueClient(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQClien
 
     async def enqueue(self, events: List[Envelope[EVENT_TYPE]])->int:
         request = EnqueueRequest(events = events)
-        request_bytes = dill.dumps(request)
-        await self.socket.send(request_bytes)
-        response_bytes = await self.socket.recv()
-        response = dill.loads(response_bytes)
+        response = await self.send_request(request)
         return response.count
 
     async def remaining_capacity(self)->int:
         request = RemainingCapacityRequest()
-        request_bytes = dill.dumps(request)
-        await self.socket.send(request_bytes)
-        response_bytes = await self.socket.recv()
-        response = dill.loads(response_bytes)
+        response = await self.send_request(request)
         return response.count
 
     async def get_events(self, subscriber: str, limit: int = 0)->List[Envelope[EVENT_TYPE]]:
         request = GetEventsRequest(subscriber=subscriber, limit=limit)
-        request_bytes = dill.dumps(request)
-        await self.socket.send(request_bytes)
-        response_bytes = await self.socket.recv()
-        response = dill.loads(response_bytes)
+        response = await self.send_request(request)
         return response.events
 
     async def acknowledge_events(self, subscriber: str, n: int)->None:
         request = AcknowledgeEventsRequest(subscriber=subscriber, count = n)
-        request_bytes = dill.dumps(request)
-        await self.socket.send(request_bytes)
-        response_bytes = await self.socket.recv()
-        response = dill.loads(response_bytes)
-        return None
+        await self.send_request(request)
 
 
 local_event_queue_registry = {}
