@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import logging
 import os
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Any, Optional
 
@@ -24,6 +25,7 @@ DEFAULT_QUEUE_SIZE = 10_000
 @dataclass
 class DeployStageRequest:
     stage: FlowStage
+    job_id: str
     preferred_network: str
     outboxes: List[List[QueueDescriptor]]
 
@@ -55,11 +57,12 @@ class FlowEngine(ZMQServer):
         self.cluster_number = cluster_number
         self.cluster_size = cluster_size
         self.worker_id = itertools.count()
+        self.worker_map = defaultdict(list)
 
     async def process_request(self, request: Any) -> Any:
         if isinstance(request, DeployStageRequest):
             inbox_address = await self.deploy_stage(stage=request.stage, network=request.preferred_network,
-                                                    outboxes=request.outboxes)
+                                                    outboxes=request.outboxes, job_id = request.job_id)
             return DeployStageResponse(inbox_address=inbox_address)
         elif isinstance(request, ShutdownRequest):
             await self.request_shutdown()
@@ -90,13 +93,14 @@ class FlowEngine(ZMQServer):
 
         logging.info("(%d) FlowEngine stopped", os.getpid())
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[QueueDescriptor]],
+    async def deploy_stage(self, stage: FlowStage, job_id: str, outboxes: List[List[QueueDescriptor]],
                            network: str) -> QueueDescriptor | None:
         worker = stage.build_worker(input_queue_size=self.default_queue_size,
                                     preferred_network=network,
                                     outboxes=outboxes)
         worker.id = WorkerId(cluster_number=self.cluster_number, worker_number=next(self.worker_id))
         await worker.init()
+        self.worker_map[job_id].append(worker)
         self.workers.append(worker)
         if worker.input_queue and not isinstance(worker.input_queue, SourceAdapter):
             return QueueDescriptor(address=worker.input_queue.address, cluster_size=self.cluster_size,
@@ -118,8 +122,8 @@ class FlowEngineClient(ZMQClient):
     def __init__(self, server_address: str):
         ZMQClient.__init__(self, server_address)
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[QueueDescriptor]], network: str) -> QueueDescriptor:
-        deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes, preferred_network=network)
+    async def deploy_stage(self, stage: FlowStage, job_id: str, outboxes: List[List[QueueDescriptor]], network: str) -> QueueDescriptor:
+        deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes, preferred_network=network, job_id=job_id)
         response = await self.send_request(deploy_request)
         return response.inbox_address
 

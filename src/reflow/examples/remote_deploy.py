@@ -52,7 +52,8 @@ async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
 
 async def main(addrs: List[str]):
     cluster = FlowCluster(addrs, preferred_network='127.0.0.1')
-    await cluster.deploy(source)
+    job_id = await cluster.deploy_job(source)
+    logging.info(f'deployed job: {job_id}')
     await cluster.request_shutdown()
 
 if __name__ == '__main__':
