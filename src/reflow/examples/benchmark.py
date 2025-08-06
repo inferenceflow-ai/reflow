@@ -110,7 +110,7 @@ async def main():
         task = asyncio.create_task(flow_engine.run())
         cluster = FlowCluster(engine_addresses = ['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
         await cluster.deploy(source)
-        await flow_engine.request_shutdown()
+        await cluster.request_shutdown(10)
         await task
         t2 = time.perf_counter(), time.process_time()
         elapsed = t2[0] - t1[0], t2[1] - t1[1]

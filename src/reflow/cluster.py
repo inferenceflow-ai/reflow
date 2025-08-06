@@ -36,8 +36,21 @@ class FlowCluster:
 
         return inboxes
 
-    async def request_shutdown(self):
-        for engine_addr in  self.engine_addresses:
-            with FlowEngineClient(engine_addr) as engine:
+    async def request_shutdown(self, timeout: int)->bool:
+        for addr in self.engine_addresses:
+            with FlowEngineClient(addr) as engine:
                 await engine.request_shutdown()
-                logging.info(f'Requested shutdown of engine at {engine_addr}')
+
+        shutdown_ok = True
+        for addr in self.engine_addresses:
+            with FlowEngineClient(addr) as engine:
+                result = await engine.wait_for_all_work_completed(timeout)
+                if not result:
+                    shutdown_ok = False
+
+        if shutdown_ok:
+            for addr in self.engine_addresses:
+                with FlowEngineClient(addr) as engine:
+                    await engine.finalize_shutdown()
+
+        return shutdown_ok

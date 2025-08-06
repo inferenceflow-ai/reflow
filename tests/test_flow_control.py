@@ -59,7 +59,7 @@ async def main():
         flow_engine_task = asyncio.create_task(flow_engine.run())
         cluster = FlowCluster(engine_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
         await cluster.deploy(event_source)
-        await flow_engine.request_shutdown()
+        await cluster.request_shutdown(10)
         await flow_engine_task
 
     logging.info("exiting")
