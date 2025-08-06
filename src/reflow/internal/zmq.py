@@ -99,7 +99,7 @@ class CommunicationTimeout(RuntimeError):
     pass
 
 
-CLIENT_TIMEOUT_MS = 200
+DEFAULT_CLIENT_TIMEOUT_MS = 300
 
 class ZMQClient:
     def __init__(self, server_address: str):
@@ -118,15 +118,15 @@ class ZMQClient:
         self.context.term()
         return False
 
-    async def send_request(self, request: Any) -> Any:
+    async def send_request(self, request: Any, timeout: int = DEFAULT_CLIENT_TIMEOUT_MS) -> Any:
         request_bytes = dill.dumps(request)
-        socket_state = await self.socket.poll(CLIENT_TIMEOUT_MS, zmq.POLLOUT)
+        socket_state = await self.socket.poll(timeout, zmq.POLLOUT)
         if socket_state & zmq.POLLOUT:
             await self.socket.send(request_bytes)
         else:
             raise CommunicationTimeout()
 
-        socket_state = await self.socket.poll(CLIENT_TIMEOUT_MS, zmq.POLLIN)
+        socket_state = await self.socket.poll(timeout, zmq.POLLIN)
         if socket_state & zmq.POLLIN:
             response_bytes = await self.socket.recv()
             response = dill.loads(response_bytes)
