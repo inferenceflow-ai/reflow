@@ -7,7 +7,6 @@ from reflow.typedefs import EVENT_TYPE
 
 class INSTRUCTION(Enum):
     PROCESS_EVENT = 1
-    END_OF_STREAM = 2
 
 
 @dataclass(frozen=True)

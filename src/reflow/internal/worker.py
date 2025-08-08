@@ -2,8 +2,8 @@ import abc
 import asyncio
 import itertools
 import logging
-import os
 from abc import ABC, abstractmethod
+from asyncio import Event
 from contextlib import ExitStack
 from typing import Generic, List
 
@@ -11,7 +11,7 @@ from reflow.internal import Envelope, INSTRUCTION, WorkerId
 from reflow.internal.edge_router import EdgeRouter, KeyBasedEdgeRouter, LoadBalancingEdgeRouter, LocalEdgeRouter
 from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue, local_event_queue_registry
 from reflow.internal.in_out_buffer import InOutBuffer
-from reflow.internal.network import QueueDescriptor
+from reflow.internal.network import WorkerDescriptor
 from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
     OUT_EVENT_TYPE, EndOfStreamException, KeyFn
 
@@ -21,7 +21,7 @@ MAX_BATCH_SIZE = 10_000
 
 class RoutingPolicy(abc.ABC):
     @abstractmethod
-    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
         pass
 
 
@@ -29,19 +29,19 @@ class KeyBasedRoutingPolicy(RoutingPolicy, Generic[EVENT_TYPE]):
     def __init__(self, key_fn: KeyFn):
         self.key_fn = key_fn
 
-    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
         return KeyBasedEdgeRouter(outbox_descriptor=outbox_descriptor,
                                   preferred_network=preferred_network,
                                   key_fn=self.key_fn)
 
 
 class LoadBalancedRoutingPolicy(RoutingPolicy):
-    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
         return LoadBalancingEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
 
 
 class LocalRoutingPolicy(RoutingPolicy):
-    def build_router(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
         return LocalEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
 
 
@@ -52,20 +52,21 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  init_fn: InitFn = None,
                  expansion_factor = 1,
                  input_queue_size: int = None,
-                 outboxes: List[List[QueueDescriptor]] = None,
+                 outboxes: List[List[WorkerDescriptor]] = None,
                  routing_policies: List[RoutingPolicy] = None):
         self.init_fn = init_fn
         self.state = None
         self.input_queue = None
         self.expansion_factor = expansion_factor
         self.id = None   # will be set immediately after construction
-        self.finished = False
         self.preferred_network = preferred_network
         self.output_queues = None
         self.in_out_buffers = None
         self.exit_stack = ExitStack()
         self.last_event_seen = {}
         self.event_counter = itertools.count()
+        self.quiesce_requested = False
+        self.quiescent = Event()
 
         if not isinstance(self, SourceWorker):
             self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)
@@ -145,30 +146,28 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         #  - trim the in/out map
         #  - after this, some events may remain in the output event list
         #
-        if self.total_unsent_events() == 0 and not self.finished:
+        if self.total_unsent_events() == 0:
             ready_events = await self.get_ready_events()
-            for envelope in ready_events:
-                if envelope.source_id in self.last_event_seen:
-                    last_event = self.last_event_seen[envelope.source_id]
-                else:
-                    last_event = envelope.sequence_num - 1
-
-                if envelope.sequence_num > last_event:
-                    if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
-                        output = self.handle_event(envelope)
-                        for in_out_buffer in self.in_out_buffers:
-                            in_out_buffer.record_split_event(output)
-                    elif envelope.instruction == INSTRUCTION.END_OF_STREAM:
-                        logging.debug(f'({os.getpid()}) {self} received END_OF_STREAM instruction')
-                        self.finished = True
-                        for in_out_buffer in self.in_out_buffers:
-                            in_out_buffer.record_1_1(envelope)
+            if len(ready_events) == 0 and self.quiesce_requested:
+                self.quiescent.set()
+            else:
+                for envelope in ready_events:
+                    if envelope.source_id in self.last_event_seen:
+                        last_event = self.last_event_seen[envelope.source_id]
                     else:
-                        raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+                        last_event = envelope.sequence_num - 1
 
-                    self.last_event_seen[envelope.source_id] = envelope.sequence_num
-                else:
-                    logging.debug('ignoring previously seen event %s:%d', envelope.source_id, envelope.sequence_num)
+                    if envelope.sequence_num > last_event:
+                        if envelope.instruction == INSTRUCTION.PROCESS_EVENT:
+                            output = self.handle_event(envelope)
+                            for in_out_buffer in self.in_out_buffers:
+                                in_out_buffer.record_split_event(output)
+                        else:
+                            raise RuntimeError(f"unknown processing instruction encountered: {envelope.instruction}")
+
+                        self.last_event_seen[envelope.source_id] = envelope.sequence_num
+                    else:
+                        logging.debug('ignoring previously seen event %s:%d', envelope.source_id, envelope.sequence_num)
 
         if self.total_unsent_events() > 0:
             min_input_events_to_acknowledge = MAX_BATCH_SIZE
@@ -183,6 +182,14 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                 await self.input_queue.acknowledge_events(self.id, min_input_events_to_acknowledge)
                 logging.debug(f'{self} acknowledged {min_input_events_to_acknowledge} input events')
 
+    async def quiesce(self, timeout_secs: float)->bool:
+        self.quiesce_requested = True
+        try:
+            await asyncio.wait_for(self.quiescent.wait(), timeout_secs)
+            return True
+        except TimeoutError:
+            return False
+
     def total_unsent_events(self)->int:
         return  sum([len(buffer.unsent_out_events) for buffer in self.in_out_buffers])
 
@@ -193,7 +200,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, producer_fn: ProducerFn,
                  preferred_network: str,
-                 outboxes: List[List[QueueDescriptor]],
+                 outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
                  init_fn: InitFn = None):
         Worker.__init__(self, init_fn = init_fn,
@@ -232,7 +239,7 @@ class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  expansion_factor: int,
                  preferred_network: str,
                  input_queue_size: int,
-                 outboxes: List[List[QueueDescriptor]],
+                 outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
                  init_fn: InitFn = None):
         Worker.__init__(self,
@@ -271,7 +278,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), event) for event in result]
         except EndOfStreamException as _:
-            return [Envelope(INSTRUCTION.END_OF_STREAM, self.id, next(self.event_counter))]
+            return []
 
     # this class does not support "acknowledge" functionality
     async def acknowledge_events(self, subscriber: str, n: int) -> None:

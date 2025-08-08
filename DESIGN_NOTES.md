@@ -120,3 +120,10 @@ Some options:
       messages propagating but a sequential check of unsent messages could say no worker has any unsent messages due to
       timing.  
 
+OK, the basic thing is that I must quiesce all upstreams before quiescing downstreams.  For that, I'll need the 
+original task graph and a way to target a specific tasks workers on a node.  The quiesce algorithm: if a source, wait 
+a certain amount of time for the source to be done, then stop it (can remove the worker from circulation).  Also, wait 
+for unsent messages to be empty.  At each subsequent stage, wait for the inbox to be empty and the unsent messages to 
+be empty.  I don't need special end of stream instructions any more.  Once the job has been shut down, the engines 
+can  shut down and exit if there are no active workers.
+

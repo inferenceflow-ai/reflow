@@ -5,14 +5,14 @@ from typing import List
 
 from reflow.internal import Envelope, INSTRUCTION
 from reflow.internal.event_queue import EventQueueClient, OutputQueue, local_event_queue_registry, DequeueEventQueue
-from reflow.internal.network import get_preferred_interface_ip, QueueDescriptor
+from reflow.internal.network import get_preferred_interface_ip, WorkerDescriptor
 from reflow.typedefs import EVENT_TYPE, KeyFn
 
 MAX_BATCH_SIZE = 10_000
 
 
 class EdgeRouter(OutputQueue[EVENT_TYPE], abc.ABC):
-    def __init__(self, outbox_descriptors: List[QueueDescriptor], preferred_network: str):
+    def __init__(self, outbox_descriptors: List[WorkerDescriptor], preferred_network: str):
         self.exit_stack = ExitStack()
         self.outbox_descriptors = outbox_descriptors
         self.outboxes = []
@@ -74,7 +74,7 @@ class EdgeRouter(OutputQueue[EVENT_TYPE], abc.ABC):
 
 
 class LoadBalancingEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str):
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str):
         EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
         self.shortest_event_queue = None
         self.shortest_event_queue_capacity = 0
@@ -100,7 +100,7 @@ class LoadBalancingEdgeRouter(EdgeRouter[EVENT_TYPE]):
 
 
 class KeyBasedEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str, key_fn: KeyFn):
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str, key_fn: KeyFn):
         EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
         self.key_fn = key_fn
 
@@ -155,7 +155,7 @@ class KeyBasedEdgeRouter(EdgeRouter[EVENT_TYPE]):
 
 
 class LocalEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[QueueDescriptor], preferred_network: str):
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str):
         EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
 
         self.local_outbox = None

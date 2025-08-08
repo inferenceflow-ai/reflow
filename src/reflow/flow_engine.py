@@ -7,9 +7,9 @@ from typing import List, Any, Optional
 
 from reflow import FlowStage
 from reflow.internal import WorkerId
-from reflow.internal.network import QueueDescriptor
+from reflow.internal.network import WorkerDescriptor
 from reflow.internal.worker import SourceAdapter
-from reflow.internal.zmq import ZMQServer, ZMQClient
+from reflow.internal.zmq import ZMQServer, ZMQClient, DEFAULT_CLIENT_TIMEOUT_MS
 
 DEFAULT_QUEUE_SIZE = 10_000
 
@@ -25,12 +25,12 @@ DEFAULT_QUEUE_SIZE = 10_000
 class DeployStageRequest:
     stage: FlowStage
     preferred_network: str
-    outboxes: List[List[QueueDescriptor]]
+    outboxes: List[List[WorkerDescriptor]]
 
 
 @dataclass
 class DeployStageResponse:
-    inbox_address: Optional[QueueDescriptor]
+    inbox_address: Optional[WorkerDescriptor]
 
 
 @dataclass
@@ -41,6 +41,27 @@ class ShutdownRequest:
 @dataclass
 class ShutdownResponse:
     pass
+
+
+@dataclass
+class QuiesceWorkerRequest:
+    descriptor: WorkerDescriptor
+    timeout_secs: float
+
+
+@dataclass
+class QuiesceWorkerResponse:
+    success: bool
+
+
+@dataclass
+class RemoveWorkerRequest:
+    descriptor: WorkerDescriptor
+
+
+@dataclass
+class RemoveWorkerResponse:
+    success: bool
 
 
 class FlowEngine(ZMQServer):
@@ -64,6 +85,12 @@ class FlowEngine(ZMQServer):
         elif isinstance(request, ShutdownRequest):
             await self.request_shutdown()
             return ShutdownResponse()
+        elif isinstance(request, QuiesceWorkerRequest):
+            success = await self.quiesce_worker(request.descriptor, request.timeout_secs)
+            return QuiesceWorkerResponse(success=success)
+        elif isinstance(request, RemoveWorkerRequest):
+            success = await self.remove_worker(request.descriptor)
+            return RemoveWorkerResponse(success=success)
         else:
             raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
@@ -75,11 +102,8 @@ class FlowEngine(ZMQServer):
                     # iterate over a copy to avoid problems related to removing while iterating
                     # it is a shallow copy - we remove from self.workers but iterate over a
                     # copy
-                    if not worker.finished or worker.total_unsent_events() > 0:
+                    if not worker.quiescent.is_set():
                         await worker.process()
-                    else:
-                        worker.__exit__(None, None, None)
-                        self.workers.remove(worker)
             elif self.shutdown_requested:
                 break
             else:
@@ -90,19 +114,24 @@ class FlowEngine(ZMQServer):
 
         logging.info("(%d) FlowEngine stopped", os.getpid())
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[QueueDescriptor]],
-                           network: str) -> QueueDescriptor | None:
+    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]],
+                           network: str) -> WorkerDescriptor | None:
         worker = stage.build_worker(input_queue_size=self.default_queue_size,
                                     preferred_network=network,
                                     outboxes=outboxes)
         worker.id = WorkerId(cluster_number=self.cluster_number, worker_number=next(self.worker_id))
         await worker.init()
         self.workers.append(worker)
+
         if worker.input_queue and not isinstance(worker.input_queue, SourceAdapter):
-            return QueueDescriptor(address=worker.input_queue.address, cluster_size=self.cluster_size,
-                                   cluster_number=self.cluster_number)
+            address = worker.input_queue.address
         else:
-            return None
+            address = None
+
+        return WorkerDescriptor(address=address,
+                                cluster_size=self.cluster_size,
+                                cluster_number=self.cluster_number,
+                                worker_number=worker.id.worker_number)
 
     async def request_shutdown(self):
         """
@@ -113,12 +142,44 @@ class FlowEngine(ZMQServer):
         """
         self.shutdown_requested = True
 
+    async def quiesce_worker(self, descriptor: WorkerDescriptor, timeout_secs: float) -> bool:
+        worker = self.find_worker(descriptor)
+        if not worker:
+            logging.warning("Worker %d not found in this engine", descriptor.worker_number)
+            return True
+        else:
+            result = await worker.quiesce(timeout_secs)
+            return result
+
+    async def remove_worker(self, descriptor: WorkerDescriptor):
+        worker = self.find_worker(descriptor)
+        if not worker:
+            logging.warning("Worker %d not found in this engine", descriptor.worker_number)
+            return True
+        else:
+            worker.__exit__(None, None, None)
+            self.workers.remove(worker)
+            return True
+
+    def find_worker(self, descriptor: WorkerDescriptor):
+        if self.cluster_number != descriptor.cluster_number:
+            assert self.cluster_number == descriptor.cluster_number
+
+        result = None
+        for worker in self.workers:
+            if worker.id.worker_number == descriptor.worker_number:
+                result = worker
+                break
+
+        return result
+
 
 class FlowEngineClient(ZMQClient):
     def __init__(self, server_address: str):
         ZMQClient.__init__(self, server_address)
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[QueueDescriptor]], network: str) -> QueueDescriptor:
+    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]],
+                           network: str) -> WorkerDescriptor:
         deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes, preferred_network=network)
         response = await self.send_request(deploy_request)
         return response.inbox_address
@@ -127,6 +188,15 @@ class FlowEngineClient(ZMQClient):
         request = ShutdownRequest()
         await self.send_request(request)
 
+    async def quiesce_worker(self, descriptor: WorkerDescriptor, timeout_secs: float) -> bool:
+        request = QuiesceWorkerRequest(descriptor=descriptor, timeout_secs=timeout_secs)
+        result = await self.send_request(request, timeout=1000 * timeout_secs + DEFAULT_CLIENT_TIMEOUT_MS)
+        return result.success
+
+    async def remove_worker(self, descriptor: WorkerDescriptor)->bool:
+        request = RemoveWorkerRequest(descriptor=descriptor)
+        result = await self.send_request(request)
+        return result.success
 
 # async def main(port: int, preferred_network: str):
 #     zmq_bind_addresses = [f'ipc://flow_engine_{port:04d}', f'tcp://*:{port}']

@@ -1,6 +1,7 @@
 import logging
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -16,10 +17,13 @@ class Address:
 
 
 @dataclass
-class QueueDescriptor:
-    address: Address
+class WorkerDescriptor:
     cluster_size: int
     cluster_number: int
+    worker_number: int
+    engine_address: str = field(init=False)
+    address: Optional[Address] = None
+
 
 def ipc_address_for_port(port: int)->str:
     return f'ipc:///tmp/service_{port:04d}.sock'

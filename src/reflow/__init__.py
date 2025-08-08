@@ -5,7 +5,7 @@ from typing import Generic, Callable, Awaitable, Self, Any, List
 
 from reflow.internal.worker import RoutingPolicy, LocalRoutingPolicy
 
-from reflow.internal.network import QueueDescriptor
+from reflow.internal.network import WorkerDescriptor
 from reflow.internal.worker import Worker, SourceWorker, SinkWorker, TransformWorker
 from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, TransformerFn, \
     IN_EVENT_TYPE
@@ -19,6 +19,7 @@ class FlowStage:
         self.routing_policies = []
         self.exit_stack = ExitStack()
         self.max_workers = max_workers
+        self.worker_descriptors = []
 
     def send_to(self, next_stage: "FlowStage", routing_policy: RoutingPolicy = LocalRoutingPolicy())-> "FlowStage":
         self.downstream_stages.append(next_stage)
@@ -28,7 +29,7 @@ class FlowStage:
     @abstractmethod
     def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[QueueDescriptor]] = None)->Worker[Any, Any, Any]:
+                     outboxes: List[List[WorkerDescriptor]] = None)->Worker[Any, Any, Any]:
         pass
 
 class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
@@ -42,7 +43,7 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
     def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[QueueDescriptor]] = None)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SourceWorker(init_fn=self.init_fn,
                             producer_fn=self.producer_fn,
                             outboxes=outboxes,
@@ -61,7 +62,7 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
     def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[QueueDescriptor]] = None)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SinkWorker(init_fn=self.init_fn,
                           consumer_fn=self.consumer_fn,
                           input_queue_size = input_queue_size,
@@ -81,9 +82,9 @@ class EventTransformer(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowS
         self.transform_fn = transform_fn
         return self
 
-    def build_worker(self,*, preferred_network: str,
+    def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[QueueDescriptor]] = None)->TransformWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None)->TransformWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
         return TransformWorker(init_fn=self.init_fn,
                                transform_fn=self.transform_fn,
                                expansion_factor=self.expansion_factor,
