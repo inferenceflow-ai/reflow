@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import multiprocessing
 import random
-import time
-from typing import List, TypeVar, Generic
+from collections import defaultdict
+from multiprocessing import Process
+from typing import List, TypeVar, Generic, Tuple, Optional, Mapping, Any
 
-from reflow.cluster import FlowCluster
+from internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink, EventTransformer
+from reflow.cluster import FlowCluster
 from reflow.flow_engine import FlowEngine
 from reflow.typedefs import EndOfStreamException
 
@@ -49,91 +52,100 @@ And lose the name of action"""]
 
 T = TypeVar("T")
 
-
 class TestDataConnection(Generic[T]):
+    """
+    Given a list of any type, the TestDataConnection implements  get_events from the InputQueue
+    """
     def __init__(self, data: List[T], stop_after: int = 0):
         self.data = data
         self.count = 0
         self.stop_after = stop_after
 
     # noinspection PyTypeChecker
-    def get_data(self, max_items: int)->List[T]:
+    def get_data(self, max_items: int)->List[Tuple[int, T]]:
         assert max_items > 0
         if self.stop_after > 0:
             max_items = min(max_items, self.stop_after - self.count)
 
         if max_items > 0:
+            ids = range(self.count, self.count + max_items)
             self.count += max_items
-            return random.choices(self.data, k=max_items)
+            return zip(ids, random.choices(self.data, k=max_items))
 
         if self.stop_after > 0:
             raise EndOfStreamException()
+
+
+def split(id_sentence_tuple: Tuple[int,str])->List[Tuple[int, Optional[str]]]:
+    request_id, sentence = id_sentence_tuple
+    result: List[Tuple[int, Optional[str]]] = [(request_id, word) for word in sentence.split()]
+    result.append((request_id, None))  # this event servers as a marker for downstream stages that the
+                                       # batch has concluded
+    return result
+
+
+class WordCounter:
+    def __init__(self):
+        self.words = defaultdict(lambda :  defaultdict(int))
+
+    def accumulate(self, event: Tuple[int, Optional[str]])->List[Tuple[int, Mapping[str, int]]]:
+        event_id, word = event
+        if word:
+            count = self.words[event_id][word]
+            self.words[event_id][word] = count + 1
+            return []
+        else:
+            result = self.words[event_id]
+            del self.words[event_id]
+            return [(event_id, result)]
 
 
 @flow_connector_factory
 def data_source(data, stop_after):
     return TestDataConnection(data, stop_after)
 
-def debug_sink(events: List[str])-> int:
+def debug_sink(events: List[Any])-> int:
     for event in events:
         print(f'EVENT: {event}')
 
     return len(events)
 
-word_count = 0
 
-def counting_sink(events: List[str])->int:
-    global word_count
-    result = len(events)
-    word_count += result
-    return result
+def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
+    asyncio.run(run_engine(cluster_number, cluster_size, bind_address))
 
-def split_fn(sentence):
-    return sentence.split()
+async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
+    with FlowEngine(cluster_number=cluster_number,
+                    cluster_size=cluster_size,
+                    default_queue_size=100,
+                    bind_addresses=[bind_address],
+                    preferred_network='127.0.0.1') as engine:
+        await engine.run()
 
-async def main():
-    source = EventSource(data_source(hamlet_sentences, 100_000)).with_producer_fn(TestDataConnection.get_data)
-    splitter = EventTransformer(expansion_factor=40).with_transform_fn(split_fn)
-    sink = EventSink().with_consumer_fn(counting_sink)
-    source.send_to(splitter).send_to(sink)
+async def main(addrs: List[str]):
+    source = EventSource(init_fn=data_source(hamlet_sentences, 3), max_workers=1).with_producer_fn(TestDataConnection.get_data)
+    splitter = EventTransformer(expansion_factor=40).with_transform_fn(split)
+    counter = EventTransformer(init_fn=WordCounter, expansion_factor=1/40).with_transform_fn(WordCounter.accumulate)
+    sink = EventSink().with_consumer_fn(debug_sink)
+    source.send_to(splitter).send_to(counter, routing_policy=KeyBasedRoutingPolicy(lambda event: event[0])).send_to(sink)
 
-    with FlowEngine(10_000, bind_addresses=['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1') as flow_engine:
-        task = asyncio.create_task(flow_engine.run())
-        cluster = FlowCluster(engine_addresses = ['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
-        await cluster.deploy(source)
-        flow_engine.request_shutdown()
-        await task
-        t2 = time.perf_counter(), time.process_time()
-        elapsed = t2[0] - t1[0], t2[1] - t1[1]
-        logging.info(f'COMPLETED in {elapsed[0]:.03f}s CPU: {elapsed[1]:.03f}  WORDS: {word_count:,d}')
+    cluster = FlowCluster(addrs, preferred_network='127.0.0.1')
+    job_id = await cluster.deploy(source)
 
+    await cluster.wait_for_completion(job_id, 10)
+    await cluster.request_shutdown()
 
-logging.basicConfig(level=logging.INFO)
-asyncio.run(main())
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    preferred_network = '127.0.0.1'
+    engine_addresses = ['ipc:///tmp/service_5001.sock', 'ipc:///tmp/service_5002.sock']
+    multiprocessing.set_start_method('fork')
+    engine_procs = [Process(target=engine_runner, args=[n, len(engine_addresses), address]) for n, address in enumerate(engine_addresses)]
+    for proc in engine_procs:
+        proc.start()
 
+    asyncio.run(main(engine_addresses))
+    logging.info("Waiting for engines to stop")
 
-# The back-pressure algorithm
-# - check output event list
-# - if there are no events in the output event list
-#   - read some number of events from input
-#   - process them, yielding output events which are placed in an output event list
-#   - record the output events in the in-out map
-#
-#  - deliver as many as possible of the output events to the output queue (usually all)
-#  - remove those events from the output event list
-#  - based on the in-out map, acknowledge the appropriate number of events from the input queue
-#  - trim the in/out map
-#  - after this, some events may remain in the output event list
-#
-# Note that delivery guarantees are handled at a higher level, not by the algorithm above.  If there is a processor
-# failure, the whole processing loop (above) starts again, beginning with the first unacknowledged event in the input
-# queue. Depending on when the failure occurred, there could be:
-# - events that were processed but not sent down stream - resulting in the event being reprocessed here but not
-#   in the down stream tasks
-# - events that were processed and sent down stream but not acknowledged on the input side - resulting in events
-#   that are reprocessed here and also in the downstream processors
-
-
-
-
-
+    for proc in engine_procs:
+        proc.join()

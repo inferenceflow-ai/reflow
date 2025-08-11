@@ -132,7 +132,7 @@ class KeyBasedEdgeRouter(EdgeRouter[EVENT_TYPE]):
         # compile a list of indices of events in [0, first_pi_index) that match each cluster number
         index_lists = [[] for _ in range(0,self.cluster_size)]
         for i, event in enumerate(events):
-            cluster_number = hash(self.key_fn(event)) % self.cluster_size
+            cluster_number = hash(self.key_fn(event.event)) % self.cluster_size
             index_lists[cluster_number].append(i)
 
         # attempt to deliver the correct subset of events to each outbox

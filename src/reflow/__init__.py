@@ -3,9 +3,8 @@ from abc import abstractmethod
 from contextlib import ExitStack
 from typing import Generic, Callable, Awaitable, Self, Any, List
 
-from reflow.internal.worker import RoutingPolicy, LocalRoutingPolicy
-
 from reflow.internal.network import WorkerDescriptor
+from reflow.internal.worker import RoutingPolicy, LocalRoutingPolicy
 from reflow.internal.worker import Worker, SourceWorker, SinkWorker, TransformWorker
 from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, TransformerFn, \
     IN_EVENT_TYPE
@@ -73,7 +72,7 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
 
 class EventTransformer(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowStage):
-    def __init__(self, expansion_factor: int, init_fn: InitFn = None, max_workers = 0):
+    def __init__(self, expansion_factor: float, init_fn: InitFn = None, max_workers = 0):
         FlowStage.__init__(self, init_fn=init_fn, max_workers=max_workers)
         self.expansion_factor = expansion_factor
         self.transform_fn = None
@@ -105,5 +104,3 @@ def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Calla
         return inner
 
     return wrapper
-
-

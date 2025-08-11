@@ -236,7 +236,7 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, transform_fn: TransformerFn,
-                 expansion_factor: int,
+                 expansion_factor: float,
                  preferred_network: str,
                  input_queue_size: int,
                  outboxes: List[List[WorkerDescriptor]],

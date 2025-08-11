@@ -127,3 +127,24 @@ for unsent messages to be empty.  At each subsequent stage, wait for the inbox t
 be empty.  I don't need special end of stream instructions any more.  Once the job has been shut down, the engines 
 can  shut down and exit if there are no active workers.
 
+## Word Count
+
+How should aggregation work.  I might want to produce a count of each word in a single request event.  How does the 
+system know when all of the resultant events have been processed ?  I also want an abstraction that supports time based 
+aggregations but that seems easier.  Suppose I carry a request id on each event which gets copied onto downstream 
+events.  Then I can have an aggregation per event BUT how do I know when it is safe to do the final aggregation and 
+emit the result ?  This should be very easy to express, maybe even the default, or with a "byRequestId" type of 
+thing.  One last bit, how do I know all of the events related to a request have showed up ?? Can I put some marker in 
+the stream, or maybe a 1 of n type of thing ? Also, what kind of routing should I support - when I tried the 
+shutdown marker, I cloned it and that caused some problems (would it still ?).  If I'm doing key based routing, do 
+I send this marker down every route ?  Suppose I have a request based Router, meaning everything related to one request 
+stays on one node.  Would that be bad ? I also have ideas about a "batch", in which the input is split and sent 
+over multiple channels (in which case, I dont use request based I guess).  How do I ensure each engine sees an event 
+only once ?  Individual, real events have this property.  Can I build this on top of a much simpler model where 
+input events produce output events ? 
+
+Suppose the splitter inserts an "end of batch event" and I route based on a field like request id (the source could 
+even introduce this id) so I'm keeping the core framework as simple as possible.  When can events that are in order 
+pass each other ?  Only when they are routed to separate engines.  Right now, there is no notion of merge. So ...
+the splitter inserts a "done" event into the stream and the downstream aggregator accumulates until it sees that event.
+Seems like it may be workable.  
