@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import multiprocessing
+import os
 import random
 from collections import defaultdict
 from multiprocessing import Process
 from typing import List, TypeVar, Generic, Tuple, Optional, Mapping, Any
 
-from internal.worker import KeyBasedRoutingPolicy
+from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink, EventTransformer
 from reflow.cluster import FlowCluster
 from reflow.flow_engine import FlowEngine
@@ -106,8 +107,11 @@ def data_source(data, stop_after):
 
 def debug_sink(events: List[Any])-> int:
     for event in events:
-        print(f'EVENT: {event}')
+        print(f'({os.getpid()}) EVENT: {event}')
 
+    return len(events)
+
+def null_sink(events: List[Any])-> int:
     return len(events)
 
 
@@ -117,13 +121,13 @@ def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
 async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
     with FlowEngine(cluster_number=cluster_number,
                     cluster_size=cluster_size,
-                    default_queue_size=100,
+                    default_queue_size=3000,
                     bind_addresses=[bind_address],
                     preferred_network='127.0.0.1') as engine:
         await engine.run()
 
 async def main(addrs: List[str]):
-    source = EventSource(init_fn=data_source(hamlet_sentences, 3), max_workers=1).with_producer_fn(TestDataConnection.get_data)
+    source = EventSource(init_fn=data_source(hamlet_sentences, 111), max_workers=1).with_producer_fn(TestDataConnection.get_data)
     splitter = EventTransformer(expansion_factor=40).with_transform_fn(split)
     counter = EventTransformer(init_fn=WordCounter, expansion_factor=1/40).with_transform_fn(WordCounter.accumulate)
     sink = EventSink().with_consumer_fn(debug_sink)
@@ -132,8 +136,9 @@ async def main(addrs: List[str]):
     cluster = FlowCluster(addrs, preferred_network='127.0.0.1')
     job_id = await cluster.deploy(source)
 
-    await cluster.wait_for_completion(job_id, 10)
+    await cluster.wait_for_completion(job_id, 100)
     await cluster.request_shutdown()
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

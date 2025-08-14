@@ -50,7 +50,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *,
                  preferred_network: str,
                  init_fn: InitFn = None,
-                 expansion_factor = 1,
+                 expansion_factor: float = 1,
                  input_queue_size: int = None,
                  outboxes: List[List[WorkerDescriptor]] = None,
                  routing_policies: List[RoutingPolicy] = None):
@@ -167,7 +167,8 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
                         self.last_event_seen[envelope.source_id] = envelope.sequence_num
                     else:
-                        logging.debug('ignoring previously seen event %s:%d', envelope.source_id, envelope.sequence_num)
+                        pass
+                        # logging.debug(f'{self} ignoring previously seen event {envelope.source_id}/{envelope.sequence_num} last seen event: {last_event}')
 
         if self.total_unsent_events() > 0:
             min_input_events_to_acknowledge = MAX_BATCH_SIZE
@@ -231,7 +232,7 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
     def handle_event(self, event: Envelope[IN_EVENT_TYPE]) ->List[Envelope[OUT_EVENT_TYPE]]:
         # sinks do not currently transform events
-        return [event]
+        return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter) ,event.event) ]
 
 
 class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
