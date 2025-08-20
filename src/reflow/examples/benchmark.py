@@ -4,6 +4,7 @@ import random
 import time
 from typing import List, TypeVar, Generic
 
+from reflow.internal import network
 from reflow.cluster import FlowCluster
 from reflow import flow_connector_factory, EventSource, EventSink, EventTransformer
 from reflow.flow_engine import FlowEngine
@@ -105,10 +106,10 @@ async def main():
     with FlowEngine(cluster_number=0,
                     cluster_size=1,
                     default_queue_size=10_000,
-                    bind_addresses=['ipc:///tmp/service_5001.sock'],
-                    preferred_network='127.0.0.1') as flow_engine:
+                    preferred_network='127.0.0.1',
+                    port=5001) as flow_engine:
         task = asyncio.create_task(flow_engine.run())
-        cluster = FlowCluster(engine_addresses = ['ipc:///tmp/service_5001.sock'], preferred_network='127.0.0.1')
+        cluster = FlowCluster(engine_addresses = [network.ipc_address_for_port(flow_engine.port)])
         job_id = await cluster.deploy(source)
         await cluster.wait_for_completion(job_id, timeout_secs=10)
         await flow_engine.request_shutdown()

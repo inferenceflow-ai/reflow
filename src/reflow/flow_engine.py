@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import itertools
 import logging
@@ -24,7 +25,6 @@ DEFAULT_QUEUE_SIZE = 10_000
 @dataclass
 class DeployStageRequest:
     stage: FlowStage
-    preferred_network: str
     outboxes: List[List[WorkerDescriptor]]
 
 
@@ -65,10 +65,13 @@ class RemoveWorkerResponse:
 
 
 class FlowEngine(ZMQServer):
-    def __init__(self, *, cluster_number: int, cluster_size: int, default_queue_size: int, preferred_network: str,
-                 bind_addresses: List[str]):
-        ZMQServer.__init__(self, bind_addresses=bind_addresses)
-        self.preferred_network = preferred_network
+    def __init__(self, *,
+                 cluster_number: int,
+                 cluster_size: int,
+                 preferred_network: str,
+                 port: int,
+                 default_queue_size: int = DEFAULT_QUEUE_SIZE):
+        ZMQServer.__init__(self, preferred_network=preferred_network, port=port)
         self.default_queue_size = default_queue_size
         self.running = True
         self.workers = []
@@ -79,8 +82,7 @@ class FlowEngine(ZMQServer):
 
     async def process_request(self, request: Any) -> Any:
         if isinstance(request, DeployStageRequest):
-            inbox_address = await self.deploy_stage(stage=request.stage, network=request.preferred_network,
-                                                    outboxes=request.outboxes)
+            inbox_address = await self.deploy_stage(stage=request.stage, outboxes=request.outboxes)
             return DeployStageResponse(inbox_address=inbox_address)
         elif isinstance(request, ShutdownRequest):
             await self.request_shutdown()
@@ -114,10 +116,9 @@ class FlowEngine(ZMQServer):
 
         logging.info("(%d) FlowEngine stopped", os.getpid())
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]],
-                           network: str) -> WorkerDescriptor | None:
+    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]]) -> WorkerDescriptor | None:
         worker = stage.build_worker(input_queue_size=self.default_queue_size,
-                                    preferred_network=network,
+                                    preferred_network=self.preferred_network,
                                     outboxes=outboxes)
         worker.id = WorkerId(cluster_number=self.cluster_number, worker_number=next(self.worker_id))
         await worker.init()
@@ -178,9 +179,8 @@ class FlowEngineClient(ZMQClient):
     def __init__(self, server_address: str):
         ZMQClient.__init__(self, server_address)
 
-    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]],
-                           network: str) -> WorkerDescriptor:
-        deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes, preferred_network=network)
+    async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]]) -> WorkerDescriptor:
+        deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes)
         response = await self.send_request(deploy_request)
         return response.inbox_address
 
@@ -198,19 +198,26 @@ class FlowEngineClient(ZMQClient):
         result = await self.send_request(request)
         return result.success
 
-# async def main(port: int, preferred_network: str):
-#     zmq_bind_addresses = [f'ipc://flow_engine_{port:04d}', f'tcp://*:{port}']
-#     with FlowEngine(DEFAULT_QUEUE_SIZE, bind_addresses=zmq_bind_addresses,
-#                     preferred_network=preferred_network) as flow_engine:
-#         task = asyncio.create_task(flow_engine.run())
-#         await task
+async def main(*, preferred_network: str, port: int, cluster_number: int, cluster_size: int):
+    with FlowEngine(cluster_number=cluster_number,
+                    cluster_size=cluster_size,
+                    default_queue_size=DEFAULT_QUEUE_SIZE,
+                    preferred_network=preferred_network,
+                    port = port) as flow_engine:
+        task = asyncio.create_task(flow_engine.run())
+        await task
 
 
-# if __name__ == '__main__':
-#     logging.basicConfig(level=logging.INFO)
-#     arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
-#     arg_parser.add_argument("port", type=int, help="The port number to listen on for deployments")
-#     arg_parser.add_argument("network", type=str, help="The network prefix that inbox servers will listen on")
-#     args = arg_parser.parse_args()
-#
-#     asyncio.run(main(args.port, args.network))
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
+    arg_parser.add_argument("--cluster-number", type=int, required=True, help="The id of this flow engine instance.  Must be in the range [0,cluster-size)")
+    arg_parser.add_argument("--cluster-size", type=int, required=True, help="The number of flow engine instances in this cluster.")
+    arg_parser.add_argument("--port", required=True, type=int, help="The port number to listen on for deployments")
+    arg_parser.add_argument("--network", required=True, type=str, help="The network prefix that inbox servers will listen on")
+    args = arg_parser.parse_args()
+
+    asyncio.run(main(preferred_network=args.network,
+                     port=args.port,
+                     cluster_size=args.cluster_size,
+                     cluster_number=args.cluster_number))

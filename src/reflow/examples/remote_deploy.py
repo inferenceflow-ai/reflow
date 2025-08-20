@@ -5,6 +5,7 @@ import os
 from multiprocessing import Process
 from typing import Iterator, List
 
+from reflow.internal import network
 from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.cluster import FlowCluster
@@ -39,19 +40,19 @@ source = EventSource(iterator_source(test_data)).with_producer_fn(iterator_produ
 sink = EventSink().with_consumer_fn(debug_consumer)
 source.send_to(sink, routing_policy=KeyBasedRoutingPolicy(lambda event: event))
 
-def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
-    asyncio.run(run_engine(cluster_number, cluster_size, bind_address))
+def engine_runner(cluster_number: int, cluster_size: int, port: int):
+    asyncio.run(run_engine(cluster_number, cluster_size, port))
 
-async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
+async def run_engine(cluster_number: int, cluster_size: int, port: int):
     with FlowEngine(cluster_number=cluster_number,
                     cluster_size=cluster_size,
                     default_queue_size=100,
-                    bind_addresses=[bind_address],
+                    port=port,
                     preferred_network='127.0.0.1') as engine:
         await engine.run()
 
 async def main(addrs: List[str]):
-    cluster = FlowCluster(addrs, preferred_network='127.0.0.1')
+    cluster = FlowCluster(addrs)
     job_id = await cluster.deploy(source)
     await cluster.wait_for_completion(job_id, 2)
     await cluster.request_shutdown()
@@ -59,9 +60,11 @@ async def main(addrs: List[str]):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     preferred_network = '127.0.0.1'
-    engine_addresses = ['ipc:///tmp/service_5001.sock', 'ipc:///tmp/service_5002.sock']
+    engine_ports = [5001, 5002]
+    engine_addresses = [network.ipc_address_for_port(p) for p in engine_ports]
     multiprocessing.set_start_method('fork')
-    engine_procs = [Process(target=engine_runner, args=[n, len(engine_addresses), address]) for n, address in enumerate(engine_addresses)]
+    engine_procs = [Process(target=engine_runner, args=[n, len(engine_addresses), p])
+                    for n, p in enumerate(engine_ports)]
     for proc in engine_procs:
         proc.start()
 

@@ -9,9 +9,8 @@ from reflow.internal.network import WorkerDescriptor
 
 
 class FlowCluster:
-    def __init__(self, engine_addresses: List[str], preferred_network: str):
+    def __init__(self, engine_addresses: List[str]):
         self.engine_addresses = engine_addresses
-        self.preferred_network = preferred_network
         self.deployed_jobs = {}
 
     async def deploy(self, source: FlowStage)->str:
@@ -41,7 +40,7 @@ class FlowCluster:
         for address in target_addresses:
             logging.info(f'Deploying {flow_stage} to engine at {address}')
             with FlowEngineClient(address) as engine:
-                worker_descriptor = await engine.deploy_stage(flow_stage, outboxes=outboxes, network=self.preferred_network)
+                worker_descriptor = await engine.deploy_stage(flow_stage, outboxes=outboxes)
                 if worker_descriptor:
                     worker_descriptor.engine_address = address
                     worker_descriptors.append(worker_descriptor)

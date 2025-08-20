@@ -59,7 +59,6 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         self.input_queue = None
         self.expansion_factor = expansion_factor
         self.id = None   # will be set immediately after construction
-        self.preferred_network = preferred_network
         self.output_queues = None
         self.in_out_buffers = None
         self.exit_stack = ExitStack()

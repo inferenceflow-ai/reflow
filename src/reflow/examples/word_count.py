@@ -7,6 +7,7 @@ from collections import defaultdict
 from multiprocessing import Process
 from typing import List, TypeVar, Generic, Tuple, Optional, Mapping, Any
 
+from reflow.internal import network
 from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink, EventTransformer
 from reflow.cluster import FlowCluster
@@ -115,14 +116,14 @@ def null_sink(events: List[Any])-> int:
     return len(events)
 
 
-def engine_runner(cluster_number: int, cluster_size: int, bind_address: str):
-    asyncio.run(run_engine(cluster_number, cluster_size, bind_address))
+def engine_runner(cluster_number: int, cluster_size: int, port: int):
+    asyncio.run(run_engine(cluster_number, cluster_size, port))
 
-async def run_engine(cluster_number: int, cluster_size: int, bind_address: str):
+async def run_engine(cluster_number: int, cluster_size: int, port: int):
     with FlowEngine(cluster_number=cluster_number,
                     cluster_size=cluster_size,
                     default_queue_size=3000,
-                    bind_addresses=[bind_address],
+                    port=port,
                     preferred_network='127.0.0.1') as engine:
         await engine.run()
 
@@ -133,7 +134,7 @@ async def main(addrs: List[str]):
     sink = EventSink().with_consumer_fn(debug_sink)
     source.send_to(splitter).send_to(counter, routing_policy=KeyBasedRoutingPolicy(lambda event: event[0])).send_to(sink)
 
-    cluster = FlowCluster(addrs, preferred_network='127.0.0.1')
+    cluster = FlowCluster(addrs)
     job_id = await cluster.deploy(source)
 
     await cluster.wait_for_completion(job_id, 100)
@@ -143,9 +144,10 @@ async def main(addrs: List[str]):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     preferred_network = '127.0.0.1'
-    engine_addresses = ['ipc:///tmp/service_5001.sock', 'ipc:///tmp/service_5002.sock']
+    engine_ports = [5001, 5002]
+    engine_addresses = [network.ipc_address_for_port(p) for p in engine_ports]
     multiprocessing.set_start_method('fork')
-    engine_procs = [Process(target=engine_runner, args=[n, len(engine_addresses), address]) for n, address in enumerate(engine_addresses)]
+    engine_procs = [Process(target=engine_runner, args=[n, len(engine_ports), p]) for n,p in enumerate(engine_ports)]
     for proc in engine_procs:
         proc.start()
 

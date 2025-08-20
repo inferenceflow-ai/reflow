@@ -11,7 +11,7 @@ from reflow.internal.network import get_preferred_interface_ip, ipc_address_for_
 
 
 class ZMQServer(abc.ABC):
-    def __init__(self, *, bind_addresses: List[str] = None, preferred_network: str = None):
+    def __init__(self, *, bind_addresses: List[str] = None, preferred_network: str = None, port:int = None):
         """
         At most one of bind_addresses or preferred_network should be provided
 
@@ -19,12 +19,15 @@ class ZMQServer(abc.ABC):
         to and will be passed directly to the socket.bind method (https://pyzmq.readthedocs.io/en/latest/api/zmq.html).
 
         preferred_network causes the bind to the tcp address on this host that starts with
-        preferred_network.  An example of preferred_network would be "192.168.1".  In this case,
-        socket.bind_to_random_port will be called.  In addition to the tcp address, the ZeroMQ server will
-        also bind to the IPC port: ipc://service_nnnn where nnnn is the selected port number
+        preferred_network.  An example of preferred_network would be "192.168.1".
 
-        If neither is provided, the ZeroMQ server will never be started, which can be useful when running everything
-        in the same process
+        If neither is provided, the ZeroMQ server will never be started, which can be useful during testing and other
+        situations where a network server is not required.
+
+        If port is not provided, socket.bind_to_random_port will be called.
+
+        The  ZeroMQ server will also bind to the IPC port: ipc://service_nnnn where nnnn is the given or randomly
+        selected port number.
         """
         provided = 0
         provided += 1 if bind_addresses else 0
@@ -35,7 +38,7 @@ class ZMQServer(abc.ABC):
 
         self.bind_addresses = bind_addresses
         self.preferred_network = preferred_network
-        self.port = None
+        self.port = port
         self.context = None
         self.socket = None
         self.task = None
@@ -61,8 +64,12 @@ class ZMQServer(abc.ABC):
                 if not self.bind_addresses or len(self.bind_addresses) == 0:
                     self.bind_addresses = []
                     preferred_address = get_preferred_interface_ip(self.preferred_network)
-                    self.port = self.socket.bind_to_random_port(f'tcp://{preferred_address}', 5001, 5999, 999)
-                    self.bind_addresses.append(f'tcp://{self.preferred_network}:{self.port}')
+                    if self.port:
+                        self.socket.bind(f'tcp://{preferred_address}:{self.port}')
+                    else:
+                        self.port = self.socket.bind_to_random_port(f'tcp://{preferred_address}', 5001, 5999, 999)
+
+                    self.bind_addresses.append(f'tcp://{preferred_address}:{self.port}')
                     ipc_address = ipc_address_for_port(self.port)
                     self.socket.bind(ipc_address)
                     self.bind_addresses.append(ipc_address)
@@ -72,7 +79,7 @@ class ZMQServer(abc.ABC):
                     for bind_address in self.bind_addresses:
                         self.socket.bind(bind_address)
 
-                logging.debug(f'starting ZeroMQ server listening on {self.bind_addresses}')
+                logging.info(f'starting ZeroMQ server listening on {self.bind_addresses}')
                 self.task = asyncio.create_task(self._serve())
 
             except:
