@@ -3,6 +3,8 @@ import socket
 from dataclasses import dataclass, field
 from typing import Optional
 
+import netifaces
+
 
 @dataclass(frozen=True)
 class Address:
@@ -30,19 +32,22 @@ def ipc_address_for_port(port: int)->str:
 
 def get_preferred_interface_ip(preferred_network: str)->str:
     logging.debug(f'looking for a bind address on this host that starts with {preferred_network}')
-    addresses = socket.getaddrinfo(None, 80, family=socket.AF_INET, type=socket.SOCK_STREAM)
-    ips = [address[4][0] for address in addresses]
     bind_address = None
-    for ip in ips:
-        if ip.startswith(preferred_network):
-            logging.debug(f'{ip} matches preferred network')
-            bind_address = ip
-            break
-        else:
-            logging.debug(f'{ip} does not match preferred network')
+    for iface in netifaces.interfaces():
+        families = netifaces.ifaddresses(iface)
+        if netifaces.AF_INET in families:
+            for addr in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
+                if addr['addr'].startswith(preferred_network):
+                    logging.debug(f'{addr['addr']} matches preferred network')
+                    bind_address = addr['addr']
+                    break
+                else:
+                    logging.debug(f'{addr['addr']} does not match preferred network')
 
     if bind_address is None:
         raise RuntimeError(f'Could not find a bind address starting with {preferred_network}')
 
     return bind_address
+
+
 
