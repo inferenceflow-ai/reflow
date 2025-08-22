@@ -148,3 +148,15 @@ even introduce this id) so I'm keeping the core framework as simple as possible.
 pass each other ?  Only when they are routed to separate engines.  Right now, there is no notion of merge. So ...
 the splitter inserts a "done" event into the stream and the downstream aggregator accumulates until it sees that event.
 Seems like it may be workable.  
+
+## End of Stream
+
+How should quiesce work ?  Currently, if "get_read_events" returns an empty list, the worker may be quiesced and 
+after that it will get no more CPU.  However, that could happen if the downstream is full or if there don't happen 
+to be any available events at the moment.  It could also be that there are no available events because the end of 
+stream has been reached.  Should we allow quiescence in the first two cases ?  Even with the current approach, there 
+is not a race between starting the worker and waiting for quiescence because only the worker.process method can 
+set the quiescent flag.  Anyway, I've decided I should require the ProducerFunction to raise a particular exception, 
+probably StopIteration.  Quiescing will only work if the source has raised this exception, not if there just happen 
+to be no available events.  However, what do I do about non source workers ?  Maybe just wait for the input queue to 
+be empty, which is slightly different than waiting for there to be no ready events.

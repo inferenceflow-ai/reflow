@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import atexit
 import itertools
 import logging
 import os
@@ -210,6 +209,7 @@ async def main(*, preferred_network: str, port: int, cluster_number: int, cluste
         task = asyncio.create_task(flow_engine.run())
         try:
             await task
+            logging.info("Flow engine finished")
         except CancelledError:
             logging.info("Flow engine task cancelled")
 

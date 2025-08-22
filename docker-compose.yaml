@@ -1,0 +1,14 @@
+services:
+  flow-engine-1:
+    build:
+      context: .
+    command: --cluster-number 0 --cluster-size 1 --port 5001 --network 192.168.1
+    networks:
+      local-area:
+        ipv4_address: 192.168.1.101
+
+networks:
+  local-area:
+    ipam:
+      config:
+        - subnet: "192.168.1.0/24"

@@ -146,10 +146,10 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         #  - after this, some events may remain in the output event list
         #
         if self.total_unsent_events() == 0:
-            ready_events = await self.get_ready_events()
-            if len(ready_events) == 0 and self.quiesce_requested:
+            if  self.quiesce_requested and self.can_quiesce():
                 self.quiescent.set()
             else:
+                ready_events = await self.get_ready_events()
                 for envelope in ready_events:
                     if envelope.source_id in self.last_event_seen:
                         last_event = self.last_event_seen[envelope.source_id]
@@ -190,6 +190,10 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         except TimeoutError:
             return False
 
+    # this only works if the input queue is a DequeEventQueue, which is to say for non-source workers
+    def can_quiesce(self)->bool:
+        return len(self.input_queue.events) == 0
+
     def total_unsent_events(self)->int:
         return  sum([len(buffer.unsent_out_events) for buffer in self.in_out_buffers])
 
@@ -217,6 +221,9 @@ class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         # sources do not currently transform events
         result = Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), envelope.event)
         return [result]
+
+    def can_quiesce(self)->bool:
+        return self.input_queue.end_of_stream_encountered
 
 
 class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
@@ -267,6 +274,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
         self.state = state
         self.event_counter = itertools.count()
         self.id = WorkerId(cluster_number=-1, worker_number=-1)
+        self.end_of_stream_encountered = False
 
     async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
         assert limit > 0
