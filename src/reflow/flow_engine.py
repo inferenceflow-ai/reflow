@@ -1,8 +1,10 @@
 import argparse
 import asyncio
+import atexit
 import itertools
 import logging
 import os
+from asyncio import CancelledError
 from dataclasses import dataclass
 from typing import List, Any, Optional
 
@@ -141,6 +143,7 @@ class FlowEngine(ZMQServer):
 
         To wait for the engine to exit, request shutdown, then await the task that is running the FlowEngine.run method.
         """
+        logging.info("Shutdown requested")
         self.shutdown_requested = True
 
     async def quiesce_worker(self, descriptor: WorkerDescriptor, timeout_secs: float) -> bool:
@@ -205,7 +208,10 @@ async def main(*, preferred_network: str, port: int, cluster_number: int, cluste
                     preferred_network=preferred_network,
                     port = port) as flow_engine:
         task = asyncio.create_task(flow_engine.run())
-        await task
+        try:
+            await task
+        except CancelledError:
+            logging.info("Flow engine task cancelled")
 
 
 if __name__ == '__main__':
