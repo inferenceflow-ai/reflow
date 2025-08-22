@@ -10,7 +10,7 @@ REFlow also has features that support event driven services.   More on that late
 
 
 
-![overview](resources/overvIew.png)
+![overview](resources/overview.png)
 
 A _flow_ defines a sequence of steps, or _stages_ that should be executed on each incoming _event_.  It starts with a _source stage_ and ends with a _sink stage_.  A _flow_ does not actually process any events, it just defines how they should be processed.  A _flow_ must be deployed to a cluster of _flow engines_ to actually process events.
 
