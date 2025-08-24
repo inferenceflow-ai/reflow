@@ -286,6 +286,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), event) for event in result]
         except EndOfStreamException as _:
+            self.end_of_stream_encountered = True
             return []
 
     # this class does not support "acknowledge" functionality
