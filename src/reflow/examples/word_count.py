@@ -137,7 +137,10 @@ async def main(addrs: List[str]):
     cluster = FlowCluster(addrs)
     job_id = await cluster.deploy(source)
 
-    await cluster.wait_for_completion(job_id, 100)
+    completed = await cluster.wait_for_completion(job_id, 100)
+    if not completed:
+        raise RuntimeError("Exiting because job did not complete in the expected time")
+
     await cluster.request_shutdown()
 
 

@@ -62,8 +62,7 @@ class RemoveWorkerRequest:
 
 @dataclass
 class RemoveWorkerResponse:
-    success: bool
-
+    pass
 
 class FlowEngine(ZMQServer):
     def __init__(self, *,
@@ -92,8 +91,8 @@ class FlowEngine(ZMQServer):
             success = await self.quiesce_worker(request.descriptor, request.timeout_secs)
             return QuiesceWorkerResponse(success=success)
         elif isinstance(request, RemoveWorkerRequest):
-            success = await self.remove_worker(request.descriptor)
-            return RemoveWorkerResponse(success=success)
+            await self.remove_worker(request.descriptor)
+            return RemoveWorkerResponse()
         else:
             raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
@@ -195,10 +194,9 @@ class FlowEngineClient(ZMQClient):
         result = await self.send_request(request, timeout=1000 * timeout_secs + DEFAULT_CLIENT_TIMEOUT_MS)
         return result.success
 
-    async def remove_worker(self, descriptor: WorkerDescriptor)->bool:
+    async def remove_worker(self, descriptor: WorkerDescriptor):
         request = RemoveWorkerRequest(descriptor=descriptor)
         result = await self.send_request(request)
-        return result.success
 
 async def main(*, preferred_network: str, port: int, cluster_number: int, cluster_size: int):
     with FlowEngine(cluster_number=cluster_number,

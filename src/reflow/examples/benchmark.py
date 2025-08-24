@@ -111,7 +111,10 @@ async def main():
         task = asyncio.create_task(flow_engine.run())
         cluster = FlowCluster(engine_addresses = [network.ipc_address_for_port(flow_engine.port)])
         job_id = await cluster.deploy(source)
-        await cluster.wait_for_completion(job_id, timeout_secs=10)
+        completed = await cluster.wait_for_completion(job_id, timeout_secs=10)
+        if not completed:
+            raise RuntimeError("Exiting because job did not complete in the expected time.")
+
         await flow_engine.request_shutdown()
         await task
         t2 = time.perf_counter(), time.process_time()

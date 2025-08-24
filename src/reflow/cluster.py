@@ -48,22 +48,36 @@ class FlowCluster:
         flow_stage.worker_descriptors = worker_descriptors
         return worker_descriptors
 
-    async def wait_for_completion(self, job_id: str, timeout_secs: int):
+    async def wait_for_completion(self, job_id: str, timeout_secs: int)->bool:
         if job_id not in self.deployed_jobs:
             raise RuntimeError(f'No deployed job with id={job_id} exists')
 
         source = self.deployed_jobs[job_id]
-        await self._quiesce(source, timeout_secs)
-        await self._prune_workers(source)
+        result = await self._quiesce(source, timeout_secs)
+        if result:
+            await self._prune_workers(source)
+            return True
+        else:
+            logging.warn(f"Job did not complete in the allotted time.")
+            return False
 
-    async def _quiesce(self, stage: FlowStage, timeout_secs: int):
+    async def _quiesce(self, stage: FlowStage, timeout_secs: int)->bool:
         for worker_descriptor in stage.worker_descriptors:
             with FlowEngineClient(worker_descriptor.engine_address) as engine:
                 logging.info(f"Waiting {timeout_secs}s for {worker_descriptor} to quiesce")
-                await engine.quiesce_worker(worker_descriptor, timeout_secs)
+                result = await engine.quiesce_worker(worker_descriptor, timeout_secs)
+                if result:
+                    logging.info(f"Worker {worker_descriptor} quiesced")
+                else:
+                    logging.warn(f"Worker {worker_descriptor} could not be quiesced")
+                    return False
 
             for stage in stage.downstream_stages:
-                await self._quiesce(stage, timeout_secs)
+                result = await self._quiesce(stage, timeout_secs)
+                if not result:
+                    return False
+
+        return True
 
     async def _prune_workers(self, stage: FlowStage):
         for s in stage.downstream_stages:
