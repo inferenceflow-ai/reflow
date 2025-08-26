@@ -7,13 +7,12 @@ from asyncio import Event
 from contextlib import ExitStack
 from typing import Generic, List
 
-from reflow.internal import Envelope, INSTRUCTION, WorkerId
 from reflow.internal.edge_router import EdgeRouter, KeyBasedEdgeRouter, LoadBalancingEdgeRouter, LocalEdgeRouter
 from reflow.internal.event_queue import OutputQueue, InputQueue, DequeueEventQueue, local_event_queue_registry
 from reflow.internal.in_out_buffer import InOutBuffer
-from reflow.internal.network import WorkerDescriptor
-from reflow.typedefs import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
-    OUT_EVENT_TYPE, EndOfStreamException, KeyFn
+from reflow import WorkerDescriptor
+from reflow.common import IN_EVENT_TYPE, TransformerFn, EVENT_TYPE, STATE_TYPE, InitFn, ProducerFn, ConsumerFn, \
+    OUT_EVENT_TYPE, EndOfStreamException, KeyFn, INSTRUCTION, WorkerId, Envelope
 
 MIN_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 10_000

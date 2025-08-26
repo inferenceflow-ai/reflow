@@ -1,6 +1,6 @@
 from typing import List
 
-from reflow.internal import INSTRUCTION, Envelope, WorkerId
+from reflow.common import INSTRUCTION, WorkerId, Envelope
 from reflow.internal.in_out_buffer import InOutBuffer
 
 def event(x: str):

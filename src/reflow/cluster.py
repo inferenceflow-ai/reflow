@@ -3,9 +3,8 @@ import random
 import uuid
 from typing import List
 
-from reflow import FlowStage
+from reflow import FlowStage, WorkerDescriptor
 from reflow.flow_engine import FlowEngineClient
-from reflow.internal.network import WorkerDescriptor
 
 
 class FlowCluster:

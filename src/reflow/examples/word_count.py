@@ -12,7 +12,7 @@ from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink, EventTransformer
 from reflow.cluster import FlowCluster
 from reflow.flow_engine import FlowEngine
-from reflow.typedefs import EndOfStreamException
+from reflow.common import EndOfStreamException
 
 hamlet_sentences =  [
 """To be, or not to be, that is the question:

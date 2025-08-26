@@ -1,29 +1,7 @@
 import logging
-from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import List
 
 import netifaces
-
-
-@dataclass(frozen=True)
-class Address:
-    ip: str
-    port: int
-
-    def ipc_bind_address(self):
-        return ipc_address_for_port(self.port)
-
-    def tcp_bind_address(self):
-        return f'tcp://{self.ip}:{self.port}'
-
-
-@dataclass
-class WorkerDescriptor:
-    cluster_size: int
-    cluster_number: int
-    worker_number: int
-    engine_address: str = field(init=False)
-    address: Optional[Address] = None
 
 
 def ipc_address_for_port(port: int)->str:

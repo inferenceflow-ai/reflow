@@ -10,7 +10,7 @@ from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.cluster import FlowCluster
 from reflow.flow_engine import FlowEngine
-from reflow.typedefs import EndOfStreamException
+from reflow.common import EndOfStreamException
 
 test_data = ["alpha", "beta", "gamma", "delta", "epsilon"]
 

@@ -4,65 +4,18 @@ import itertools
 import logging
 import os
 from asyncio import CancelledError
-from dataclasses import dataclass
-from typing import List, Any, Optional
+from typing import List, Any
 
-from reflow import FlowStage
-from reflow.internal import WorkerId
-from reflow.internal.network import WorkerDescriptor
+from reflow import FlowStage, WorkerDescriptor
+# these must be imported explicitly with reflow.flow_engine because they will be sent, serialized, from clients
+# that will know them by their full name
 from reflow.internal.worker import SourceAdapter
 from reflow.internal.zmq import ZMQServer, ZMQClient, DEFAULT_CLIENT_TIMEOUT_MS
+from reflow.common import DeployStageRequest, DeployStageResponse, ShutdownRequest, ShutdownResponse, \
+    QuiesceWorkerRequest, QuiesceWorkerResponse, RemoveWorkerRequest, RemoveWorkerResponse, WorkerId
 
 DEFAULT_QUEUE_SIZE = 10_000
 
-
-# what is the network naming scheme for flow engines ?
-#
-# There should be one per host/core - when it is started, just give it a name
-# It will be accessible on the same host as ipc://engine/nnnn
-# and from remote hosts as tcp://host:nnnn where
-# Lets use 5nnn as the port number
-
-@dataclass
-class DeployStageRequest:
-    stage: FlowStage
-    outboxes: List[List[WorkerDescriptor]]
-
-
-@dataclass
-class DeployStageResponse:
-    inbox_address: Optional[WorkerDescriptor]
-
-
-@dataclass
-class ShutdownRequest:
-    pass
-
-
-@dataclass
-class ShutdownResponse:
-    pass
-
-
-@dataclass
-class QuiesceWorkerRequest:
-    descriptor: WorkerDescriptor
-    timeout_secs: float
-
-
-@dataclass
-class QuiesceWorkerResponse:
-    success: bool
-
-
-@dataclass
-class RemoveWorkerRequest:
-    descriptor: WorkerDescriptor
-
-
-@dataclass
-class RemoveWorkerResponse:
-    pass
 
 class FlowEngine(ZMQServer):
     def __init__(self, *,

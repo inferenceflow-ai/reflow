@@ -2,7 +2,7 @@ from collections import deque, defaultdict
 from dataclasses import dataclass
 from typing import Protocol, TypeVar, List, Generic, Any
 
-from reflow.internal import Envelope
+from reflow.common import Envelope
 from reflow.internal.zmq import ZMQServer, ZMQClient
 
 EVENT_TYPE = TypeVar('EVENT_TYPE')

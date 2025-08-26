@@ -3,10 +3,10 @@ from abc import abstractmethod
 from contextlib import ExitStack
 from typing import List
 
-from reflow.internal import Envelope, INSTRUCTION
 from reflow.internal.event_queue import EventQueueClient, OutputQueue, local_event_queue_registry, DequeueEventQueue
-from reflow.internal.network import WorkerDescriptor, get_local_ipv4_addresses
-from reflow.typedefs import EVENT_TYPE, KeyFn
+from reflow.internal.network import get_local_ipv4_addresses
+from reflow import WorkerDescriptor
+from reflow.common import EVENT_TYPE, KeyFn, INSTRUCTION, Envelope
 
 MAX_BATCH_SIZE = 10_000
 

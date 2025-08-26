@@ -7,7 +7,8 @@ import dill
 import zmq
 from zmq.asyncio import Context
 
-from reflow.internal.network import get_preferred_interface_ip, ipc_address_for_port, Address
+from reflow.internal.network import get_preferred_interface_ip, ipc_address_for_port
+from reflow.common import Address
 
 
 class ZMQServer(abc.ABC):
@@ -48,11 +49,14 @@ class ZMQServer(abc.ABC):
         self.disabled = disabled
 
     async def _serve(self):
-        while True:
-            request_bytes = await self.socket.recv()
-            request = dill.loads(request_bytes)
-            response = await self.process_request(request)
-            await self.socket.send(dill.dumps(response))
+        try:
+            while True:
+                request_bytes = await self.socket.recv()
+                request = dill.loads(request_bytes)
+                response = await self.process_request(request)
+                await self.socket.send(dill.dumps(response))
+        except RuntimeError as x:
+            logging.error(f'ZMQ main service loop is exiting due to {x}')
 
     @abc.abstractmethod
     async def process_request(self, request: Any)->Any:

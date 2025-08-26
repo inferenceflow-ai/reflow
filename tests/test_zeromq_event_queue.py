@@ -1,6 +1,6 @@
 import pytest
 
-from reflow.internal import wrap, unwrap
+from reflow.common import wrap, unwrap
 from reflow.internal.event_queue import EventQueueClient, DequeueEventQueue
 
 

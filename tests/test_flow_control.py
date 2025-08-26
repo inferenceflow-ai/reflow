@@ -6,7 +6,7 @@ from reflow.internal import network
 from reflow.cluster import FlowCluster
 from reflow import flow_connector_factory, EventSource, EventSink
 from reflow.flow_engine import FlowEngine
-from reflow.typedefs import EndOfStreamException
+from reflow.common import EndOfStreamException
 
 
 T = TypeVar("T")

@@ -1,35 +1,12 @@
 import logging
-from abc import abstractmethod
-from contextlib import ExitStack
-from typing import Generic, Callable, Awaitable, Self, Any, List
+from typing import Generic, Callable, Awaitable, Self, List
 
-from reflow.internal.network import WorkerDescriptor
+from reflow.common import WorkerDescriptor, FlowStage
 from reflow.internal.worker import RoutingPolicy, LocalRoutingPolicy
-from reflow.internal.worker import Worker, SourceWorker, SinkWorker, TransformWorker
-from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, TransformerFn, \
+from reflow.internal.worker import SourceWorker, SinkWorker, TransformWorker
+from reflow.common import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, ConsumerFn, OUT_EVENT_TYPE, TransformerFn, \
     IN_EVENT_TYPE
 
-
-class FlowStage:
-    def __init__(self, init_fn: InitFn = None, max_workers:int = 0):
-        self.init_fn = init_fn
-        self.state = None
-        self.downstream_stages = []
-        self.routing_policies = []
-        self.exit_stack = ExitStack()
-        self.max_workers = max_workers
-        self.worker_descriptors = []
-
-    def send_to(self, next_stage: "FlowStage", routing_policy: RoutingPolicy = LocalRoutingPolicy())-> "FlowStage":
-        self.downstream_stages.append(next_stage)
-        self.routing_policies.append(routing_policy)
-        return next_stage
-
-    @abstractmethod
-    def build_worker(self, *, preferred_network: str,
-                     input_queue_size: int = None,
-                     outboxes: List[List[WorkerDescriptor]] = None)->Worker[Any, Any, Any]:
-        pass
 
 class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
     def __init__(self, init_fn: InitFn = None, max_workers:int = 0):

@@ -1,6 +1,6 @@
 from typing import Any, List
 
-from reflow.internal import Envelope
+from reflow.common import Envelope
 
 
 class InOutBuffer:
