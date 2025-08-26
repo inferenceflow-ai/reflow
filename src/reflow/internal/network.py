@@ -1,7 +1,6 @@
 import logging
-import socket
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 
 import netifaces
 
@@ -30,19 +29,29 @@ class WorkerDescriptor:
 def ipc_address_for_port(port: int)->str:
     return f'ipc:///tmp/service_{port:04d}.sock'
 
-def get_preferred_interface_ip(preferred_network: str)->str:
-    logging.debug(f'looking for a bind address on this host that starts with {preferred_network}')
-    bind_address = None
+
+def get_local_ipv4_addresses()->List[str]:
+    result = []
     for iface in netifaces.interfaces():
         families = netifaces.ifaddresses(iface)
         if netifaces.AF_INET in families:
             for addr in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
-                if addr['addr'].startswith(preferred_network):
-                    logging.debug(f'{addr['addr']} matches preferred network')
-                    bind_address = addr['addr']
-                    break
-                else:
-                    logging.debug(f'{addr['addr']} does not match preferred network')
+                result.append(addr['addr'])
+
+    return result
+
+
+def get_preferred_interface_ip(preferred_network: str)->str:
+    logging.debug(f'looking for a bind address on this host that starts with {preferred_network}')
+    bind_address = None
+    ipv4_addresses = get_local_ipv4_addresses()
+    for addr in ipv4_addresses:
+        if addr.startswith(preferred_network):
+            logging.debug(f'{addr} matches preferred network')
+            bind_address = addr
+            break
+        else:
+            logging.debug(f'{addr} does not match preferred network')
 
     if bind_address is None:
         raise RuntimeError(f'Could not find a bind address starting with {preferred_network}')

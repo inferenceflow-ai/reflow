@@ -5,22 +5,22 @@ from typing import List
 
 from reflow.internal import Envelope, INSTRUCTION
 from reflow.internal.event_queue import EventQueueClient, OutputQueue, local_event_queue_registry, DequeueEventQueue
-from reflow.internal.network import get_preferred_interface_ip, WorkerDescriptor
+from reflow.internal.network import WorkerDescriptor, get_local_ipv4_addresses
 from reflow.typedefs import EVENT_TYPE, KeyFn
 
 MAX_BATCH_SIZE = 10_000
 
 
 class EdgeRouter(OutputQueue[EVENT_TYPE], abc.ABC):
-    def __init__(self, outbox_descriptors: List[WorkerDescriptor], preferred_network: str):
+    def __init__(self, outbox_descriptors: List[WorkerDescriptor]):
         self.exit_stack = ExitStack()
         self.outbox_descriptors = outbox_descriptors
         self.outboxes = []
-        my_address = get_preferred_interface_ip(preferred_network)
+        local_ips = get_local_ipv4_addresses()
         for address in [descriptor.address for descriptor in outbox_descriptors]:
             if address in local_event_queue_registry:
                 outbox = local_event_queue_registry[address]
-            elif address.ip == my_address:
+            elif address.ip in local_ips:
                 outbox = EventQueueClient(address.ipc_bind_address())
                 self.exit_stack.enter_context(outbox)
             else:
@@ -74,8 +74,8 @@ class EdgeRouter(OutputQueue[EVENT_TYPE], abc.ABC):
 
 
 class LoadBalancingEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str):
-        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor]):
+        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor)
         self.shortest_event_queue = None
         self.shortest_event_queue_capacity = 0
 
@@ -100,8 +100,8 @@ class LoadBalancingEdgeRouter(EdgeRouter[EVENT_TYPE]):
 
 
 class KeyBasedEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str, key_fn: KeyFn):
-        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor], key_fn: KeyFn):
+        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor)
         self.key_fn = key_fn
 
         # validate that all outbox descriptors have the same cluster_size and that all cluster_numbers
@@ -155,8 +155,8 @@ class KeyBasedEdgeRouter(EdgeRouter[EVENT_TYPE]):
 
 
 class LocalEdgeRouter(EdgeRouter[EVENT_TYPE]):
-    def __init__(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str):
-        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor, preferred_network=preferred_network)
+    def __init__(self, outbox_descriptor: List[WorkerDescriptor]):
+        EdgeRouter.__init__(self, outbox_descriptors=outbox_descriptor)
 
         self.local_outbox = None
         for outbox in self.outboxes:

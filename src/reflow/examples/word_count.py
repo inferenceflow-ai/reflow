@@ -123,8 +123,7 @@ async def run_engine(cluster_number: int, cluster_size: int, port: int):
     with FlowEngine(cluster_number=cluster_number,
                     cluster_size=cluster_size,
                     default_queue_size=3000,
-                    port=port,
-                    preferred_network='127.0.0.1') as engine:
+                    port=port) as engine:
         await engine.run()
 
 async def main(addrs: List[str]):

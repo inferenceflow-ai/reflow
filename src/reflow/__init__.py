@@ -40,7 +40,7 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.producer_fn = producer_fn
         return self
 
-    def build_worker(self, *, preferred_network: str,
+    def build_worker(self, *, preferred_network: str = None,
                      input_queue_size: int = None,
                      outboxes: List[List[WorkerDescriptor]] = None)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SourceWorker(init_fn=self.init_fn,
@@ -59,7 +59,7 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
         self.consumer_fn = consumer_fn
         return self
 
-    def build_worker(self, *, preferred_network: str,
+    def build_worker(self, *, preferred_network: str = None,
                      input_queue_size: int = None,
                      outboxes: List[List[WorkerDescriptor]] = None)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SinkWorker(init_fn=self.init_fn,

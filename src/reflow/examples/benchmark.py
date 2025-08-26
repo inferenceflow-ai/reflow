@@ -106,7 +106,6 @@ async def main():
     with FlowEngine(cluster_number=0,
                     cluster_size=1,
                     default_queue_size=10_000,
-                    preferred_network='127.0.0.1',
                     port=5001) as flow_engine:
         task = asyncio.create_task(flow_engine.run())
         cluster = FlowCluster(engine_addresses = [network.ipc_address_for_port(flow_engine.port)])

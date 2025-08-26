@@ -55,8 +55,8 @@ class OutputQueue(Protocol[EVENT_TYPE]):
 
 
 class DequeueEventQueue(InputQueue[EVENT_TYPE], OutputQueue[EVENT_TYPE], ZMQServer):
-    def __init__(self, capacity: int, *, bind_addresses: List[str] = None, preferred_network = None):
-        ZMQServer.__init__(self, bind_addresses=bind_addresses, preferred_network=preferred_network)
+    def __init__(self, capacity: int, *, bind_addresses: List[str] = None, preferred_network = None, disable_network_sever = False):
+        ZMQServer.__init__(self, bind_addresses=bind_addresses, preferred_network=preferred_network, disabled=disable_network_sever)
         self.events = deque(maxlen=capacity)
         self.next_event = defaultdict(lambda: -1)
 

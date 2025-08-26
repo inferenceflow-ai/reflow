@@ -6,7 +6,7 @@ from reflow.internal.event_queue import DequeueEventQueue
 
 @pytest.mark.asyncio
 async def test_single_subscriber_basic():
-    q = DequeueEventQueue(6)
+    q = DequeueEventQueue(6, disable_network_sever=True)
     await q.enqueue(wrap(["a","b","c"]))
 
     result = await q.get_events("frodo", 2)

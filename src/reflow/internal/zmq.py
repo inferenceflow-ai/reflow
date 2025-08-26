@@ -11,7 +11,7 @@ from reflow.internal.network import get_preferred_interface_ip, ipc_address_for_
 
 
 class ZMQServer(abc.ABC):
-    def __init__(self, *, bind_addresses: List[str] = None, preferred_network: str = None, port:int = None):
+    def __init__(self, *, bind_addresses: List[str] = None, preferred_network: str = None, port:int = None, disabled:bool = False):
         """
         At most one of bind_addresses or preferred_network should be provided
 
@@ -21,7 +21,9 @@ class ZMQServer(abc.ABC):
         preferred_network causes the bind to the tcp address on this host that starts with
         preferred_network.  An example of preferred_network would be "192.168.1".
 
-        If neither is provided, the ZeroMQ server will never be started, which can be useful during testing and other
+        If neither is provided, the ZeroMQ server will listen on all network interfaces
+
+        If disabled is true, the server will not be started, which can be useful during testing and other
         situations where a network server is not required.
 
         If port is not provided, socket.bind_to_random_port will be called.
@@ -43,6 +45,7 @@ class ZMQServer(abc.ABC):
         self.socket = None
         self.task = None
         self.address = None
+        self.disabled = disabled
 
     async def _serve(self):
         while True:
@@ -56,14 +59,18 @@ class ZMQServer(abc.ABC):
         pass
 
     def __enter__(self):
-        if self.bind_addresses or self.preferred_network:
+        if not self.disabled:
             try:
                 self.context = Context()
                 self.socket = self.context.socket(zmq.REP)
 
                 if not self.bind_addresses or len(self.bind_addresses) == 0:
                     self.bind_addresses = []
-                    preferred_address = get_preferred_interface_ip(self.preferred_network)
+                    if not self.preferred_network:
+                        preferred_address = '0.0.0.0'
+                    else:
+                        preferred_address = get_preferred_interface_ip(self.preferred_network)
+
                     if self.port:
                         self.socket.bind(f'tcp://{preferred_address}:{self.port}')
                     else:
@@ -93,7 +100,7 @@ class ZMQServer(abc.ABC):
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
-        if self.bind_addresses:
+        if not self.disabled:
             logging.debug(f'stopping ZeroMQ server listening on {self.bind_addresses}')
             self.task.cancel()
             self.socket.close()

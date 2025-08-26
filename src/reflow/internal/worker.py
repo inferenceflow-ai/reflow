@@ -21,7 +21,7 @@ MAX_BATCH_SIZE = 10_000
 
 class RoutingPolicy(abc.ABC):
     @abstractmethod
-    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor])->EdgeRouter:
         pass
 
 
@@ -29,26 +29,25 @@ class KeyBasedRoutingPolicy(RoutingPolicy, Generic[EVENT_TYPE]):
     def __init__(self, key_fn: KeyFn):
         self.key_fn = key_fn
 
-    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor])->EdgeRouter:
         return KeyBasedEdgeRouter(outbox_descriptor=outbox_descriptor,
-                                  preferred_network=preferred_network,
                                   key_fn=self.key_fn)
 
 
 class LoadBalancedRoutingPolicy(RoutingPolicy):
-    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
-        return LoadBalancingEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor])->EdgeRouter:
+        return LoadBalancingEdgeRouter(outbox_descriptor=outbox_descriptor)
 
 
 class LocalRoutingPolicy(RoutingPolicy):
-    def build_router(self, outbox_descriptor: List[WorkerDescriptor], preferred_network: str)->EdgeRouter:
-        return LocalEdgeRouter(outbox_descriptor=outbox_descriptor, preferred_network=preferred_network)
+    def build_router(self, outbox_descriptor: List[WorkerDescriptor])->EdgeRouter:
+        return LocalEdgeRouter(outbox_descriptor=outbox_descriptor)
 
 
 
 class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *,
-                 preferred_network: str,
+                 preferred_network:str = None ,
                  init_fn: InitFn = None,
                  expansion_factor: float = 1,
                  input_queue_size: int = None,
@@ -84,8 +83,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
             self.output_queues = []
             self.in_out_buffers = []
             for n, queue_descriptor_list in enumerate(outboxes):
-                output_queue = routing_policies[n].build_router(outbox_descriptor=queue_descriptor_list,
-                                                                preferred_network=preferred_network)
+                output_queue = routing_policies[n].build_router(outbox_descriptor=queue_descriptor_list)
                 self.output_queues.append(output_queue)
                 self.in_out_buffers.append(InOutBuffer())
                 self.exit_stack.enter_context(output_queue)
@@ -203,9 +201,9 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, producer_fn: ProducerFn,
-                 preferred_network: str,
                  outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
+                 preferred_network: str = None,
                  init_fn: InitFn = None):
         Worker.__init__(self, init_fn = init_fn,
                         preferred_network=preferred_network,
@@ -227,7 +225,7 @@ class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, consumer_fn: ConsumerFn, preferred_network: str, input_queue_size: int, init_fn: InitFn = None):
+    def __init__(self, *, consumer_fn: ConsumerFn,  input_queue_size: int, init_fn: InitFn = None, preferred_network: str = None):
         Worker.__init__(self, init_fn=init_fn, preferred_network=preferred_network, input_queue_size=input_queue_size)
         self.consumer_fn = consumer_fn
 
@@ -244,10 +242,10 @@ class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
     def __init__(self, *, transform_fn: TransformerFn,
                  expansion_factor: float,
-                 preferred_network: str,
                  input_queue_size: int,
                  outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
+                 preferred_network: str = None,
                  init_fn: InitFn = None):
         Worker.__init__(self,
                         init_fn=init_fn,

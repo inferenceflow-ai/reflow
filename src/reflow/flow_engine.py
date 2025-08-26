@@ -68,9 +68,19 @@ class FlowEngine(ZMQServer):
     def __init__(self, *,
                  cluster_number: int,
                  cluster_size: int,
-                 preferred_network: str,
                  port: int,
+                 preferred_network: str = None,
                  default_queue_size: int = DEFAULT_QUEUE_SIZE):
+        """
+        Creates a new FlowEngine server
+
+        Args:
+            cluster_number:     the id of this particular instance in the cluster - must be in [0,cluster_size)
+            cluster_size:       the total number of instances in the cluster
+            port:               the port to listen on
+            preferred_network:  the network interface prefix to listen on - if not provided, will listen on all interfaces
+            default_queue_size: the size of the message queues between workers
+        """
         ZMQServer.__init__(self, preferred_network=preferred_network, port=port)
         self.default_queue_size = default_queue_size
         self.running = True
@@ -213,12 +223,12 @@ async def main(*, preferred_network: str, port: int, cluster_number: int, cluste
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     arg_parser = argparse.ArgumentParser(description="Run a local flow engine", add_help=True, exit_on_error=True)
     arg_parser.add_argument("--cluster-number", type=int, required=True, help="The id of this flow engine instance.  Must be in the range [0,cluster-size)")
     arg_parser.add_argument("--cluster-size", type=int, required=True, help="The number of flow engine instances in this cluster.")
     arg_parser.add_argument("--port", required=True, type=int, help="The port number to listen on for deployments")
-    arg_parser.add_argument("--network", required=True, type=str, help="The network prefix that inbox servers will listen on")
+    arg_parser.add_argument("--network", required=False, type=str, help="The network prefix that inbox servers will listen on")
     args = arg_parser.parse_args()
 
     asyncio.run(main(preferred_network=args.network,
