@@ -1,7 +1,8 @@
 import logging
 from abc import abstractmethod
 from contextlib import ExitStack
-from typing import Generic, Callable, Awaitable, Self, Any, List
+from dataclasses import dataclass
+from typing import Generic, Callable, Awaitable, Self, Any, List, Optional
 
 from reflow.internal.network import WorkerDescriptor
 from reflow.internal.worker import RoutingPolicy, LocalRoutingPolicy
@@ -104,3 +105,45 @@ def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Calla
         return inner
 
     return wrapper
+
+
+@dataclass
+class DeployStageRequest:
+    stage: FlowStage
+    outboxes: List[List[WorkerDescriptor]]
+
+
+@dataclass
+class DeployStageResponse:
+    inbox_address: Optional[WorkerDescriptor]
+
+
+@dataclass
+class ShutdownRequest:
+    pass
+
+
+@dataclass
+class ShutdownResponse:
+    pass
+
+
+@dataclass
+class QuiesceWorkerRequest:
+    descriptor: WorkerDescriptor
+    timeout_secs: float
+
+
+@dataclass
+class QuiesceWorkerResponse:
+    success: bool
+
+
+@dataclass
+class RemoveWorkerRequest:
+    descriptor: WorkerDescriptor
+
+
+@dataclass
+class RemoveWorkerResponse:
+    pass
