@@ -160,3 +160,5 @@ set the quiescent flag.  Anyway, I've decided I should require the ProducerFunct
 probably StopIteration.  Quiescing will only work if the source has raised this exception, not if there just happen 
 to be no available events.  However, what do I do about non source workers ?  Maybe just wait for the input queue to 
 be empty, which is slightly different than waiting for there to be no ready events.
+
+## Remote Code

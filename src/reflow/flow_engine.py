@@ -56,6 +56,8 @@ class FlowEngine(ZMQServer):
             await self.remove_worker(request.descriptor)
             return RemoveWorkerResponse()
         else:
+            msg = f'Request must be an instance of a known request type.  Received {type(request)}'
+            logging.warning(msg)
             raise RuntimeError(f'Request must be an instance of a known request type.  Received {type(request)}')
 
     async def run(self):

@@ -17,7 +17,6 @@ class FlowStage:
         self.state = None
         self.downstream_stages = []
         self.routing_policies = []
-        self.exit_stack = ExitStack()
         self.max_workers = max_workers
         self.worker_descriptors = []
 
