@@ -1,6 +1,7 @@
+import inspect
 import logging
-from abc import abstractmethod
-from contextlib import ExitStack
+import os.path
+from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from typing import Generic, Callable, Awaitable, Self, Any, List, Optional
 
@@ -11,7 +12,31 @@ from reflow.typedefs import STATE_TYPE, EVENT_TYPE, InitFn, ProducerFn, Consumer
     IN_EVENT_TYPE
 
 
-class FlowStage:
+def get_calling_module_name()->str:
+    frame = inspect.currentframe().f_back
+    while frame:
+        module_name = frame.f_globals['__name__']
+        if module_name != 'reflow':
+            break
+        frame = frame.f_back
+
+    if module_name == '__main__':
+        file = frame.f_globals['__file__']
+        module_name = os.path.splitext(os.path.basename(file))[0]
+
+    return module_name
+
+def find_stage(base_stage: "FlowStage", address: List[int])->"FlowStage":
+    if len(address) == 0:
+        return base_stage
+
+    if address[0] >= len(base_stage.downstream_stages):
+        raise IndexError()
+
+    next_stage = base_stage.downstream_stages[address[0]]
+    return find_stage(next_stage, address[1:])
+
+class FlowStage(ABC):
     def __init__(self, init_fn: InitFn = None, max_workers:int = 0):
         self.init_fn = init_fn
         self.state = None
@@ -19,8 +44,13 @@ class FlowStage:
         self.routing_policies = []
         self.max_workers = max_workers
         self.worker_descriptors = []
+        self.flow_module = get_calling_module_name()
+        self.address = []
 
     def send_to(self, next_stage: "FlowStage", routing_policy: RoutingPolicy = LocalRoutingPolicy())-> "FlowStage":
+        child_num = len(self.downstream_stages)
+        next_stage.address = self.address.copy()
+        next_stage.address.append(child_num)
         self.downstream_stages.append(next_stage)
         self.routing_policies.append(routing_policy)
         return next_stage
@@ -108,13 +138,15 @@ def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Calla
 
 @dataclass
 class DeployStageRequest:
-    stage: FlowStage
+    flow_module: str
+    stage_address: List[int]
     outboxes: List[List[WorkerDescriptor]]
 
 
 @dataclass
 class DeployStageResponse:
     inbox_address: Optional[WorkerDescriptor]
+    error: Optional[str] = None
 
 
 @dataclass

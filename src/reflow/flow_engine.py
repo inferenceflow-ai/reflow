@@ -1,13 +1,15 @@
 import argparse
 import asyncio
+import importlib
 import itertools
 import logging
 import os
+import sys
 from asyncio import CancelledError
-from typing import List, Any
+from typing import List, Any, Optional
 
 from reflow import FlowStage, DeployStageRequest, DeployStageResponse, ShutdownRequest, ShutdownResponse, \
-    QuiesceWorkerRequest, QuiesceWorkerResponse, RemoveWorkerRequest, RemoveWorkerResponse
+    QuiesceWorkerRequest, QuiesceWorkerResponse, RemoveWorkerRequest, RemoveWorkerResponse, find_stage
 from reflow.internal import WorkerId
 from reflow.internal.network import WorkerDescriptor
 from reflow.internal.worker import SourceAdapter
@@ -41,10 +43,55 @@ class FlowEngine(ZMQServer):
         self.cluster_number = cluster_number
         self.cluster_size = cluster_size
         self.worker_id = itertools.count()
+        self.flows = {}  # key is module name, value is the first FlowStage in the Flow (the EventSource)
+
+    async def load_flow(self, module_name: str)->bool:
+        if module_name in self.flows:
+            return True
+
+        logging.info(f'attempting to import module: "{module_name}"')
+        logging.debug(f'sys.path is {sys.path}')
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            logging.error(f'module "{module_name}" not found')
+            return False
+
+        # This approach did not work for a reason that is not yet understood - it seems like the import_module call
+        # never returns
+        #
+        # loop = asyncio.get_running_loop()
+        # try:
+        #     module = await asyncio.wait_for(loop.run_in_executor(None, importlib.import_module, module_name, None), 3.0)
+        # except TimeoutError:
+        #     logging.error(f"Flow cannot be loaded because it's module was not found: {module}")
+        #     return False
+
+        if 'create_flow' not in vars(module):
+            logging.error(f'Cannot load flow because the {module} module does not contain a "create_flow" function')
+            return False
+
+        self.flows[module_name] = module.create_flow()
+        logging.info(f'Loaded flow "{module_name}" from {vars(module)["__file__"]}')
+        return True
+
+    async def get_flow(self, module_name: str)->Optional[FlowStage]:
+        if module_name not in self.flows:
+            loaded = await self.load_flow(module_name)
+            if not loaded:
+                return None
+
+        return self.flows[module_name]
 
     async def process_request(self, request: Any) -> Any:
         if isinstance(request, DeployStageRequest):
-            inbox_address = await self.deploy_stage(stage=request.stage, outboxes=request.outboxes)
+            flow = await self.get_flow(request.flow_module)
+            if not flow:
+                return DeployStageResponse(inbox_address=None, error = f"Could not load flow {request.flow_module}")
+
+            stage = find_stage(flow, request.stage_address)
+
+            inbox_address = await self.deploy_stage(stage=stage, outboxes=request.outboxes)
             return DeployStageResponse(inbox_address=inbox_address)
         elif isinstance(request, ShutdownRequest):
             await self.request_shutdown()
@@ -145,8 +192,11 @@ class FlowEngineClient(ZMQClient):
         ZMQClient.__init__(self, server_address)
 
     async def deploy_stage(self, stage: FlowStage, outboxes: List[List[WorkerDescriptor]]) -> WorkerDescriptor:
-        deploy_request = DeployStageRequest(stage=stage, outboxes=outboxes)
-        response = await self.send_request(deploy_request)
+        deploy_request = DeployStageRequest(flow_module=stage.flow_module, stage_address=stage.address, outboxes=outboxes)
+        response = await self.send_request(deploy_request, timeout=3_600_000)
+        if response.error:
+            raise RuntimeError(response.error)
+
         return response.inbox_address
 
     async def request_shutdown(self):
@@ -160,7 +210,7 @@ class FlowEngineClient(ZMQClient):
 
     async def remove_worker(self, descriptor: WorkerDescriptor):
         request = RemoveWorkerRequest(descriptor=descriptor)
-        result = await self.send_request(request)
+        await self.send_request(request)
 
 async def main(*, preferred_network: str, port: int, cluster_number: int, cluster_size: int):
     with FlowEngine(cluster_number=cluster_number,
