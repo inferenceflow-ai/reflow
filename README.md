@@ -1,3 +1,7 @@
+# Announcement
+
+
+
 # Overview
 
 REFlow is a pure Python event processing frameworks.  As a REFlow developer, you define a _flow_, which is a graph 
@@ -14,7 +18,7 @@ REFlow also has features that support event driven services.   More on that late
 
 A _flow_ defines a sequence of steps, or _stages_ that should be executed on each incoming _event_.  It starts with a _source stage_ and ends with a _sink stage_.  A _flow_ does not actually process any events, it is just a definition.  A _flow_ must be deployed to a cluster of _flow engines_ to actually process events.
 
-A _stage_ is a container for a piece of Python code that is used to process an _event_. The code for a stage is provided in the form of a Python function.  A stage can be stateful, meaning that it has a memory.  In this case, the developer will provide a Python class for the state in addition to a function to process the _event_. For example, a stateful _stage_ could compute a moving, 1 minute, average of a series of stock prices.  A _stage_ that only emits events is a _source_.  A _stage_ that only consumes events is a _sink_ , and all other stages are _transform stages_.  
+A _stage_ is a container for a piece of Python code that is used to process an _event_. The code for a stage is provided in the form of a Python function.  A stage can be stateful or not.  If a stage is stateful, the developer will provide a Python class for the state in addition to a function to process the _event_ (usually a class method).  A _stage_ that only emits events is a _source_.  A _stage_ that only consumes events is a _sink_ , and all other stages are _transform stages_.  
 
 An _event_ is any piece of data, typically one that represents something that happened, like a purchase or a price change.  It can be a `str`, `int`, `dict` or a more complex type.  The are no restrictions on the data type of an _event_, however, the developer of the python code for each _stage_ must know what it will be consuming and what it is expected to produce.  
 
