@@ -132,7 +132,7 @@ class ZMQClient:
         self.context.term()
         return False
 
-    async def send_request(self, request: Any, timeout: int = DEFAULT_CLIENT_TIMEOUT_MS) -> Any:
+    async def send_request(self, request: Any, timeout: float = DEFAULT_CLIENT_TIMEOUT_MS) -> Any:
         request_bytes = dill.dumps(request)
         socket_state = await self.socket.poll(timeout, zmq.POLLOUT)
         if socket_state & zmq.POLLOUT:
