@@ -1,12 +1,19 @@
 import asyncio
 import logging
 import random
-import sys
-from typing import List
+from typing import List, Tuple
 
+from reflow.internal.worker import KeyBasedRoutingPolicy
 from reflow import EventSource, EventSink, EventTransformer
 from reflow.cluster import FlowCluster
 from reflow.typedefs import EndOfStreamException
+
+
+#
+# Note
+#
+# Run `docker compose up -d` to start a 2 node cluster before running this example
+#
 
 
 class RandomWalkTempSimulator:
@@ -45,6 +52,24 @@ class RandomWalkTempSimulator:
         self.count += num_to_produce
         return result
 
+class MachineShopSimulator:
+    def __init__(self, machine_count: int, max_events_per_machine: int):
+        self.machine_count = machine_count
+        self.machines = [RandomWalkTempSimulator(98, [-2.0, -1.0, 0.0, 1.0, 2.0], max_events_per_machine) for _ in range(machine_count)]
+
+    def next(self, limit: int) -> List[Tuple[int, float]]:
+        if limit <= self.machine_count:
+            n = random.randint(0, self.machine_count - 1)
+            temps = self.machines[n].next(limit)
+            return [(n, t) for t in temps]
+        else:
+            limit_per_machine = int( limit / self.machine_count)
+            result = []
+            for n, machine in enumerate(self.machines):
+                events = machine.next(limit_per_machine)
+                result.extend([(n, event) for event in events])
+
+            return result
 
 def check_temp(temp: float):
     if temp > 100.0:
@@ -59,15 +84,18 @@ def print_sink(events: List[str]) -> int:
 
     return len(events)
 
+# NOTE
+#
+# All flow modules must have a function called "create_flow" which returns a connected set of FLowStages describing a
+# flow.
+#
 
 def create_flow()->EventSource:
-    source = EventSource(lambda: RandomWalkTempSimulator(98, [-2.0, -1.0, 0.0, 1.0, 2.0], 100)).with_producer_fn(RandomWalkTempSimulator.next)
+    source = EventSource(lambda: MachineShopSimulator(5,100), max_workers=1).with_producer_fn(MachineShopSimulator.next)
     temp_filter = EventTransformer(expansion_factor=1.0).with_transform_fn(check_temp)
     sink = EventSink().with_consumer_fn(print_sink)
-    source.send_to(sink)
+    source.send_to(sink, routing_policy=KeyBasedRoutingPolicy(lambda event: event[0]))
     return source
-
-
 
 if __name__ == '__main__':
     engine_addresses = ['tcp://localhost:5001', 'tcp://localhost:5002']
