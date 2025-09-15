@@ -72,10 +72,10 @@ class FlowCluster:
                     logging.warn(f"Worker {worker_descriptor} could not be quiesced")
                     return False
 
-            for stage in stage.downstream_stages:
-                result = await self._quiesce(stage, timeout_secs)
-                if not result:
-                    return False
+        for stage in stage.downstream_stages:
+            result = await self._quiesce(stage, timeout_secs)
+            if not result:
+                return False
 
         return True
 
