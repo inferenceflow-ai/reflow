@@ -52,7 +52,8 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  expansion_factor: float = 1,
                  input_queue_size: int = None,
                  outboxes: List[List[WorkerDescriptor]] = None,
-                 routing_policies: List[RoutingPolicy] = None):
+                 routing_policies: List[RoutingPolicy] = None,
+                 slow_mo = False):
         self.init_fn = init_fn
         self.state = None
         self.input_queue = None
@@ -65,6 +66,7 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         self.event_counter = itertools.count()
         self.quiesce_requested = False
         self.quiescent = Event()
+        self.slow_mo = slow_mo
 
         if not isinstance(self, SourceWorker):
             self.input_queue = DequeueEventQueue(input_queue_size, preferred_network=preferred_network)
@@ -143,7 +145,12 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
         #  - trim the in/out map
         #  - after this, some events may remain in the output event list
         #
+
+        if self.slow_mo:
+            await asyncio.sleep(1)
+
         if self.total_unsent_events() == 0:
+
             if  self.quiesce_requested and self.can_quiesce():
                 self.quiescent.set()
             else:
@@ -167,18 +174,21 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                         pass
                         # logging.debug(f'{self} ignoring previously seen event {envelope.source_id}/{envelope.sequence_num} last seen event: {last_event}')
 
-        if self.total_unsent_events() > 0:
-            min_input_events_to_acknowledge = MAX_BATCH_SIZE
-            for in_out_buffer, output_queue in zip(self.in_out_buffers, self.output_queues):
+        min_input_events_to_acknowledge = MAX_BATCH_SIZE
+        for in_out_buffer, output_queue in zip(self.in_out_buffers, self.output_queues):
+            if len(in_out_buffer.unsent_out_events) > 0:
                 logging.debug(f'{self} attempting to deliver  { len(in_out_buffer.unsent_out_events)}  output events to {output_queue}')
                 consumed_events = await output_queue.enqueue(in_out_buffer.unsent_out_events)
                 logging.debug(f'{self} delivered  {consumed_events}  output events to {output_queue}')
-                input_events_to_acknowledge = in_out_buffer.record_delivered_out_events(consumed_events)
-                min_input_events_to_acknowledge = min(min_input_events_to_acknowledge, input_events_to_acknowledge)
+            else:
+                consumed_events = 0
 
-            if min_input_events_to_acknowledge > 0:
-                await self.input_queue.acknowledge_events(self.id, min_input_events_to_acknowledge)
-                logging.debug(f'{self} acknowledged {min_input_events_to_acknowledge} input events')
+            input_events_to_acknowledge = in_out_buffer.record_delivered_out_events(consumed_events)
+            min_input_events_to_acknowledge = min(min_input_events_to_acknowledge, input_events_to_acknowledge)
+
+        if min_input_events_to_acknowledge > 0:
+            await self.input_queue.acknowledge_events(self.id, min_input_events_to_acknowledge)
+            logging.debug(f'{self} acknowledged {min_input_events_to_acknowledge} input events')
 
     async def quiesce(self, timeout_secs: float)->bool:
         self.quiesce_requested = True
@@ -190,7 +200,13 @@ class Worker(ABC, Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
     # this only works if the input queue is a DequeEventQueue, which is to say for non-source workers
     def can_quiesce(self)->bool:
-        return len(self.input_queue.events) == 0
+        input_queue_events = len(self.input_queue.events)
+        if input_queue_events > 0:
+            logging.debug(f"{self} cannot quiesce because there are {input_queue_events} in the input queue")
+        else:
+            logging.debug(f"{self} can quiesce")
+
+        return input_queue_events == 0
 
     def total_unsent_events(self)->int:
         return  sum([len(buffer.unsent_out_events) for buffer in self.in_out_buffers])
@@ -204,11 +220,13 @@ class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
                  preferred_network: str = None,
-                 init_fn: InitFn = None):
+                 init_fn: InitFn = None,
+                 slow_mo: bool = False):
         Worker.__init__(self, init_fn = init_fn,
                         preferred_network=preferred_network,
                         outboxes=outboxes,
-                        routing_policies=routing_policies)
+                        routing_policies=routing_policies,
+                        slow_mo=slow_mo)
         self.producer_fn = producer_fn
 
     async def init(self):
@@ -225,8 +243,8 @@ class SourceWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
 
 
 class SinkWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
-    def __init__(self, *, consumer_fn: ConsumerFn,  input_queue_size: int, init_fn: InitFn = None, preferred_network: str = None):
-        Worker.__init__(self, init_fn=init_fn, preferred_network=preferred_network, input_queue_size=input_queue_size)
+    def __init__(self, *, consumer_fn: ConsumerFn,  input_queue_size: int, init_fn: InitFn = None, preferred_network: str = None, slow_mo: bool = False):
+        Worker.__init__(self, init_fn=init_fn, preferred_network=preferred_network, input_queue_size=input_queue_size, slow_mo=slow_mo)
         self.consumer_fn = consumer_fn
 
     async def init(self):
@@ -246,14 +264,16 @@ class TransformWorker(Worker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]):
                  outboxes: List[List[WorkerDescriptor]],
                  routing_policies: List[RoutingPolicy],
                  preferred_network: str = None,
-                 init_fn: InitFn = None):
+                 init_fn: InitFn = None,
+                 slow_mo: bool = False):
         Worker.__init__(self,
                         init_fn=init_fn,
                         expansion_factor=expansion_factor,
                         preferred_network=preferred_network,
                         input_queue_size=input_queue_size,
                         outboxes = outboxes,
-                        routing_policies=routing_policies)
+                        routing_policies=routing_policies,
+                        slow_mo=slow_mo)
         self.transform_fn = transform_fn
 
     def handle_event(self, envelope: Envelope[IN_EVENT_TYPE]) -> List[Envelope[EVENT_TYPE]]:
@@ -276,6 +296,9 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
     async def get_events(self, subscriber: str, limit: int = 0) -> List[Envelope[EVENT_TYPE]]:
         assert limit > 0
+        if self.end_of_stream_encountered:
+            return []
+
         try:
             if self.state:
                 result = await asyncio.get_running_loop().run_in_executor( None, self.producer_fn, self.state, limit)
@@ -284,6 +307,7 @@ class SourceAdapter(Generic[STATE_TYPE, EVENT_TYPE], InputQueue[EVENT_TYPE]):
 
             return [Envelope(INSTRUCTION.PROCESS_EVENT, self.id, next(self.event_counter), event) for event in result]
         except EndOfStreamException as _:
+            logging.debug('END OF STREAM encountered')
             self.end_of_stream_encountered = True
             return []
 

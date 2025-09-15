@@ -58,7 +58,8 @@ class FlowStage(ABC):
     @abstractmethod
     def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[WorkerDescriptor]] = None)->Worker[Any, Any, Any]:
+                     outboxes: List[List[WorkerDescriptor]] = None,
+                     slow_mo: bool = False)->Worker[Any, Any, Any]:
         pass
 
 class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
@@ -72,12 +73,14 @@ class EventSource(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
     def build_worker(self, *, preferred_network: str = None,
                      input_queue_size: int = None,
-                     outboxes: List[List[WorkerDescriptor]] = None)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None,
+                     slow_mo: bool = False)->SourceWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SourceWorker(init_fn=self.init_fn,
                             producer_fn=self.producer_fn,
                             outboxes=outboxes,
                             routing_policies = self.routing_policies,
-                            preferred_network=preferred_network)
+                            preferred_network=preferred_network,
+                            slow_mo=slow_mo)
 
 
 class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
@@ -91,11 +94,13 @@ class EventSink(Generic[EVENT_TYPE, STATE_TYPE], FlowStage):
 
     def build_worker(self, *, preferred_network: str = None,
                      input_queue_size: int = None,
-                     outboxes: List[List[WorkerDescriptor]] = None)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None,
+                     slow_mo: bool = False)->SinkWorker[EVENT_TYPE, EVENT_TYPE, STATE_TYPE]:
         return SinkWorker(init_fn=self.init_fn,
                           consumer_fn=self.consumer_fn,
                           input_queue_size = input_queue_size,
-                          preferred_network=preferred_network)
+                          preferred_network=preferred_network,
+                          slow_mo=slow_mo)
 
     def send_to(self, next_stage: "EventSink", routing_policy: RoutingPolicy = LocalRoutingPolicy()):
         logging.warning("Attempt to connect a downstream stage to a sink has been ignored")
@@ -113,14 +118,16 @@ class EventTransformer(Generic[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE], FlowS
 
     def build_worker(self, *, preferred_network: str,
                      input_queue_size: int = None,
-                     outboxes: List[List[WorkerDescriptor]] = None)->TransformWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
+                     outboxes: List[List[WorkerDescriptor]] = None,
+                     slow_mo: bool = False)->TransformWorker[IN_EVENT_TYPE, OUT_EVENT_TYPE, STATE_TYPE]:
         return TransformWorker(init_fn=self.init_fn,
                                transform_fn=self.transform_fn,
                                expansion_factor=self.expansion_factor,
                                input_queue_size = input_queue_size,
                                outboxes=outboxes,
                                routing_policies = self.routing_policies,
-                               preferred_network=preferred_network)
+                               preferred_network=preferred_network,
+                               slow_mo=False)
 
 
 def flow_connector_factory(init_fn: Callable[..., Awaitable[STATE_TYPE]])->Callable[..., InitFn]:
