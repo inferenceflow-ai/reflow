@@ -71,11 +71,34 @@ class MachineShopSimulator:
 
             return result
 
-def check_temp(temp: float):
-    if temp > 100.0:
-        return ["WARNING"]
+
+class ChangeDetector:
+    def __init__(self):
+        self.machines = {}
+
+    def filter_event(self, event: Tuple[int, float, str])->List[Tuple[int, float, str]]:
+        machine, temp, status = event
+        if machine not in self.machines:
+            self.machines[machine] = status
+            return [event]
+        else:
+            prev_status = self.machines[machine]
+            if status == prev_status:
+                return []
+            else:
+                self.machines[machine] = status
+                return [event]
+
+def categorize_temp(event: Tuple[int, float])->List[Tuple[int, float, str]]:
+    machine, temp = event
+    if temp < 97.0:
+        status = "COLD"
+    elif temp > 99.0:
+        status = "HOT"
     else:
-        return []
+        status = "NOMINAL"
+
+    return [(machine, temp, status)]
 
 
 def print_sink(events: List[str]) -> int:
@@ -92,9 +115,10 @@ def print_sink(events: List[str]) -> int:
 
 def create_flow()->EventSource:
     source = EventSource(lambda: MachineShopSimulator(5,100), max_workers=1).with_producer_fn(MachineShopSimulator.next)
-    temp_filter = EventTransformer(expansion_factor=1.0).with_transform_fn(check_temp)
+    categorize = EventTransformer(expansion_factor=1.0).with_transform_fn(categorize_temp)
+    change_detector = EventTransformer(init_fn=ChangeDetector, expansion_factor=1.0).with_transform_fn(ChangeDetector.filter_event)
     sink = EventSink().with_consumer_fn(print_sink)
-    source.send_to(sink, routing_policy=KeyBasedRoutingPolicy(lambda event: event[0]))
+    source.send_to(categorize, routing_policy=KeyBasedRoutingPolicy(lambda event: event[0])).send_to(change_detector).send_to(sink)
     return source
 
 if __name__ == '__main__':
