@@ -1,7 +1,3 @@
-# Announcement
-
-
-
 # Overview
 
 REFlow is a pure Python event processing frameworks.  As a REFlow developer, you define a _flow_, which is a graph 
@@ -26,7 +22,31 @@ _Workers_ are the tasks that actually process events.  You can think of a _worke
 
 A _flow engine_ is a process that is responsible for actually executing the event processing logic.  Each _flow engine_ runs an [asycio](https://docs.python.org/3/library/asyncio.html) main loop.  As such, it is generally single-threaded although some tasks are delegated out to thread pools.  Multiple _flow engines_ should be run on each machine in order to make use of all available CPU.   A cluster of _flow engines_ can span multiple machines as long as there is network connectivity between them.  A _flow engine_ can have _workers_ from multiple _flows_ running at the same time.  The _flow engine_ ensures that all _flows_ continuously make progress by rotating through the deployed _workers_, giving each a turn to use the CPU.
 
-That's enough to get started.  Next we'll create our first _flow_.
+That's enough to get started.   
 
-## Example 1
+# Getting Started 
+
+Start a basic 2 node flow cluster: `docker compose up -d`
+
+Next, learn to write a basic flow by studying the  [temperature monitor flow](./examples/temp_monitor_flow.py)
+
+# Known Issues
+
+This project is not ready for production use.  Many issues related to error handling still need to be addressed.  Please see https://github.com/orgs/inferenceflow-ai/projects/1 for a list of issues.  Feel free to report issues or fix them!
+
+# Next
+
+- More examples
+- Lots of error handing
+- Move "FlowCluster" out of the client.  Give it supervisory functionality.
+
+
+
+
+
+
+
+
+
+
 
