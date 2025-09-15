@@ -58,5 +58,17 @@ def get_preferred_interface_ip(preferred_network: str)->str:
 
     return bind_address
 
+def get_any_nonlocal_ip()->str:
+    result = None
+    ipv4_addresses = get_local_ipv4_addresses()
+    for addr in ipv4_addresses:
+        if addr != '127.0.0.1':
+            result = addr
+            break
+
+    if result is None:
+        raise RuntimeError(f'Could not find a non-local ip on this host')
+
+    return result
 
 

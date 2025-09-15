@@ -7,7 +7,7 @@ import dill
 import zmq
 from zmq.asyncio import Context
 
-from reflow.internal.network import get_preferred_interface_ip, ipc_address_for_port, Address
+from reflow.internal.network import get_preferred_interface_ip, get_any_nonlocal_ip, ipc_address_for_port, Address
 
 
 class ZMQServer(abc.ABC):
@@ -80,6 +80,12 @@ class ZMQServer(abc.ABC):
                     ipc_address = ipc_address_for_port(self.port)
                     self.socket.bind(ipc_address)
                     self.bind_addresses.append(ipc_address)
+
+                    # if 0.0.0.0 was used as the bind address then we need to look up a specific address that
+                    # can be used to access this server
+                    if preferred_address == '0.0.0.0':
+                        preferred_address = get_any_nonlocal_ip()
+
                     self.address = Address(preferred_address, self.port)
 
                 else:
