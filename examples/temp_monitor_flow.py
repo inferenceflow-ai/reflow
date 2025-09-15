@@ -14,6 +14,8 @@ from reflow.typedefs import EndOfStreamException
 #
 # Run `docker compose up -d` to start a 2 node cluster before running this example
 #
+# Use `docker compose logs --follow` to see the output
+#
 
 
 class RandomWalkTempSimulator:
@@ -111,6 +113,20 @@ def print_sink(events: List[str]) -> int:
 #
 # All flow modules must have a function called "create_flow" which returns a connected set of FLowStages describing a
 # flow.
+#
+# As you can see from this example, stateful stages, such as the change detector, are created with an init_fn,
+# which is a function that will be called by the engine to initialize the state object for this stage of the flow.
+#
+# A transform function specified how events are processed.  If it is a stateful stage, the transform function
+# takes an instance of the state object (i.e. the one returned by the init fn) and an event.  Stateless transforms
+# are passed only the event.  In any case, a transform returns a list which represents the result of processing one
+# event. If the list is empty then the transform has filtered the event from the stream.  If the list contains
+# multiple results, then the transform has split the events into multiple events which will be processed independently.
+#
+# Routing policies control how events move between stages in a multi-engine environment.  The default is to process the
+# event on the same engine as where it was produced.  There is a KeyBased routing policy which allows events with
+# the same key to be routed to the same engine, and a load balancing routing policy, which routed events to the
+# engine to the instance of the next stage that has the smallest queue.
 #
 
 def create_flow()->EventSource:
