@@ -2,6 +2,18 @@ services:
   flow-engine-1:
     build:
       context: .
-    command: --cluster-number 0 --cluster-size 1 --port 5001
+    command: --cluster-number 0 --cluster-size 2 --port 5001 --module-path /root/reflow/modules
     ports:
       - "5001:5001"
+    volumes:
+      - "./examples:/root/reflow/modules"
+
+  flow-engine-2:
+    build:
+      context: .
+    command: --cluster-number 1 --cluster-size 2 --port 5002 --module-path /root/reflow/modules 
+    ports:
+      - "5002:5002"
+    volumes:
+      - "./examples:/root/reflow/modules"
+
